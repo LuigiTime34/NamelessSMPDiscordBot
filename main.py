@@ -164,8 +164,9 @@ async def on_message(message):
         minecraftName = messageContent.split(" left the server")[0]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-
-            cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", (int(time.time()) - cursor.execute("SELECT joinTime FROM users WHERE minecraftName = ?", (minecraftName,)), minecraftName))
+            cursor.execute("SELECT joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
+            result = cursor.fetchone()
+            cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", (int(time.time()) - result[0]) , minecraftName)
             cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
             conn.commit()
 
