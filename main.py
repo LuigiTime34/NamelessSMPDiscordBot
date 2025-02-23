@@ -164,8 +164,9 @@ async def on_message(message):
         minecraftName = messageContent.split(" left the server")[0]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-
-            cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", (int(time.time()) - cursor.execute("SELECT joinTime FROM users WHERE minecraftName = ?", (minecraftName,)), minecraftName))
+            cursor.execute("SELECT joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
+            result = cursor.fetchone()
+            cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", (int(time.time()) - result[0]) , minecraftName)
             cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
             conn.commit()
 
@@ -201,7 +202,7 @@ async def on_message(message):
         minecraftName = messageContent.split()[1]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT discordName FROM users WHERE minecraftName = ?", (minecraftName,))
+            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
             result = cursor.fetchone()
             if result:
                 discordName = result[0]
@@ -370,10 +371,6 @@ async def addHistory(ctx, user: discord.Member, statType: str, count: int):
 
 @bot.command(name='deathlist')
 async def deathList(ctx):
-    if not isMod(ctx):
-        await ctx.send("You don't have permission to use this command.")
-        return
-    
     with sqlite3.connect(DATABASE_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, deathCount FROM users ORDER BY deathCount DESC")
@@ -388,10 +385,6 @@ async def deathList(ctx):
 
 @bot.command(name='advancementlist')
 async def advancementList(ctx):
-    if not isMod(ctx):
-        await ctx.send("You don't have permission to use this command.")
-        return
-    
     with sqlite3.connect(DATABASE_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, advancementCount FROM users ORDER BY advancementCount DESC")
@@ -406,10 +399,6 @@ async def advancementList(ctx):
 
 @bot.command(name='playtimelist')
 async def playtimeList(ctx):
-    if not isMod(ctx):
-        await ctx.send("You don't have permission to use this command.")
-        return
-    
     with sqlite3.connect(DATABASE_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, playtimeSeconds FROM users ORDER BY playtimeSeconds DESC")
