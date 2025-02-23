@@ -31,22 +31,25 @@ async def updateRanksRoles(bot):
     with sqlite3.connect(DATABASE_PATH) as conn:
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM users ORDER BY deathCount DESC LIMIT 1")
+        # Only get users with deaths > 0
+        cursor.execute("SELECT * FROM users WHERE deathCount > 0 ORDER BY deathCount DESC LIMIT 1")
         userWithMostDeaths = cursor.fetchone()
         
-        cursor.execute("SELECT * FROM users ORDER BY deathCount ASC LIMIT 1")
+        cursor.execute("SELECT * FROM users WHERE deathCount > 0 ORDER BY deathCount ASC LIMIT 1")
         userWithLeastDeaths = cursor.fetchone()
         
-        cursor.execute("SELECT * FROM users ORDER BY advancementCount DESC LIMIT 1")
+        # Only get users with advancements > 0
+        cursor.execute("SELECT * FROM users WHERE advancementCount > 0 ORDER BY advancementCount DESC LIMIT 1")
         userWithMostAdvancements = cursor.fetchone()
         
-        cursor.execute("SELECT * FROM users ORDER BY advancementCount ASC LIMIT 1")
+        cursor.execute("SELECT * FROM users WHERE advancementCount > 0 ORDER BY advancementCount ASC LIMIT 1")
         userWithLeastAdvancements = cursor.fetchone()
 
-        cursor.execute("SELECT * FROM users ORDER BY playtimeSeconds DESC LIMIT 1")
+        # Only get users with playtime > 0
+        cursor.execute("SELECT * FROM users WHERE playtimeSeconds > 0 ORDER BY playtimeSeconds DESC LIMIT 1")
         userWithMostPlaytime = cursor.fetchone()
 
-        cursor.execute("SELECT * FROM users ORDER BY playtimeSeconds ASC LIMIT 1")
+        cursor.execute("SELECT * FROM users WHERE playtimeSeconds > 0 ORDER BY playtimeSeconds ASC LIMIT 1")
         userWithLowestPlaytime = cursor.fetchone()
 
         # Get or create roles
@@ -126,14 +129,30 @@ async def on_message(message):
     if "### :octagonal_sign: **Server has stopped**" in messageContent:
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
+            # Update server status
             cursor.execute("UPDATE server SET serverIsOnline = 0")
+            
+            # Get all online players and update their playtime
+            cursor.execute("SELECT discordUsername, joinTime FROM users WHERE joinTime > 0")
+            online_players = cursor.fetchall()
+            current_time = int(time.time())
+            
+            for discord_username, join_time in online_players:
+                # Update playtime
+                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?", 
+                            (current_time - join_time, discord_username))
+                # Reset join time
+                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", 
+                            (discord_username,))
+            
             conn.commit()
-        # Remove online role
-        member = discord.utils.get(message.guild.members, name=discordName)
-        if member:
-            role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-            if role and role in member.roles:
-                await member.remove_roles(role)
+
+    # Remove online role from all members who have it
+    online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+    if online_role:
+        for member in message.guild.members:
+            if online_role in member.roles and not member.bot:
+                await member.remove_roles(online_role)
 
 
     if "### :white_check_mark: **Server has started**" in messageContent:
@@ -147,37 +166,47 @@ async def on_message(message):
         minecraftName = messageContent.split(" joined the server")[0]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-            
-            cursor.execute("UPDATE users SET joinTime = ? WHERE minecraftName = ?", (int(time.time()), minecraftName))
-            conn.commit()
-            
-        member = discord.utils.get(message.guild.members, name=discordName)
-        if member:
-            role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-            if role:
-                await member.add_roles(role)
-            await message.add_reaction('✅')
-        else:
-            await message.add_reaction('❓')
+            # First get the Discord username for this Minecraft name
+            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+            result = cursor.fetchone()
+            if result:
+                discordUsername = result[0]
+                # Then get the member using the correct Discord username
+                member = discord.utils.get(message.guild.members, name=discordUsername)
+                if member and not member.bot:  # Add check for bot
+                    cursor.execute("UPDATE users SET joinTime = ? WHERE minecraftName = ?", (int(time.time()), minecraftName))
+                    conn.commit()
+                    role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+                    if role:
+                        await member.add_roles(role)
+                    await message.add_reaction('✅')
+                else:
+                    await message.add_reaction('❓')
 
     elif " left the server" in messageContent:
         minecraftName = messageContent.split(" left the server")[0]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
+            # First get the Discord username for this Minecraft name
+            cursor.execute("SELECT discordUsername, joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
             result = cursor.fetchone()
-            cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", (int(time.time()) - result[0]) , minecraftName)
-            cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
-            conn.commit()
-
-        member = discord.utils.get(message.guild.members, name=discordName)
-        if member:
-            role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-            if role and role in member.roles:
-                await member.remove_roles(role)
-            await message.add_reaction('👋')
-        else:
-            await message.add_reaction('❓')
+            if result:
+                discordUsername, joinTime = result
+                # Update playtime
+                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
+                            (int(time.time()) - joinTime, minecraftName))
+                cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
+                conn.commit()
+                
+                # Get the correct member using Discord username
+                member = discord.utils.get(message.guild.members, name=discordUsername)
+                if member and not member.bot:
+                    role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+                    if role and role in member.roles:
+                        await member.remove_roles(role)
+                    await message.add_reaction('👋')
+                else:
+                    await message.add_reaction('❓')
 
     # Handle death messages
     elif messageContent.startswith(DEATH_MARKER):
@@ -188,14 +217,10 @@ async def on_message(message):
             result = cursor.fetchone()
             if result:
                 discordName = result[0]
-                cursor.execute("SELECT deathCount FROM deaths WHERE discordUsername = ?", (discordName,))
-                deathCount = cursor.fetchone()
-                if deathCount:
-                    cursor.execute("UPDATE deaths SET deathCount = ? WHERE discordUsername = ?", (deathCount[0] + 1, discordName))
-                else:
-                    print('this should never happen and everything has gone horriblely wrong like this code base')
+                # Update the users table directly - removed incorrect table reference
+                cursor.execute("UPDATE users SET deathCount = deathCount + 1 WHERE discordUsername = ?", (discordName,))
                 conn.commit()
-            await updateRanksRoles(message.guild)
+                await updateRanksRoles(message.guild)
 
     # Handle advancement messages
     elif messageContent.startswith(ADVANCEMENT_MARKER):
@@ -206,14 +231,10 @@ async def on_message(message):
             result = cursor.fetchone()
             if result:
                 discordName = result[0]
-                cursor.execute("SELECT advancementCount FROM advancements WHERE discordUsername = ?", (discordName,))
-                advCount = cursor.fetchone()
-                if advCount:
-                    cursor.execute("UPDATE users SET advancementCount = ? WHERE discordUsername = ?", (advCount[0] + 1, discordName))
-                else:
-                    print('this should never happen and everything has gone horriblely wrong like this code base')
+                # Update the users table directly - removed incorrect table reference
+                cursor.execute("UPDATE users SET advancementCount = advancementCount + 1 WHERE discordUsername = ?", (discordName,))
                 conn.commit()
-            await updateRanksRoles(message.guild)
+                await updateRanksRoles(message.guild)
 
     await bot.process_commands(message)
 
@@ -440,4 +461,4 @@ async def on_command_error(ctx, error):
 
 
 # Run the bot
-bot.run('TOKEN')
+bot.run('MTIzMjg0ODQxMjIzNjU3ODkwNw.G2l20t.30N6YyDdKtjS9Oa1VZXHzProupq1nyW6DFyhfY')
