@@ -459,4 +459,4 @@ async def on_command_error(ctx, error):
 
 
 # Run the bot
-bot.run('MTIzMjg0ODQxMjIzNjU3ODkwNw.Gz1axG.w60oby_5ZQ2GrWMclz0ikovLRYFhvXvfmIHWjw')
+bot.run('TOKEN')
