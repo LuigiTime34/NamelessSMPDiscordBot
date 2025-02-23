@@ -201,7 +201,7 @@ async def on_message(message):
         minecraftName = messageContent.split()[1]
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT discordName FROM users WHERE minecraftName = ?", (minecraftName,))
+            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
             result = cursor.fetchone()
             if result:
                 discordName = result[0]
