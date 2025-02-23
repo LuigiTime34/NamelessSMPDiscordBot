@@ -126,33 +126,31 @@ async def on_message(message):
     
     discordName = message.author.name
 
+    # Only remove the online role if the server is offline
     if "### :octagonal_sign: **Server has stopped**" in messageContent:
         with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.cursor()
-            # Update server status
             cursor.execute("UPDATE server SET serverIsOnline = 0")
-            
+
             # Get all online players and update their playtime
             cursor.execute("SELECT discordUsername, joinTime FROM users WHERE joinTime > 0")
             online_players = cursor.fetchall()
             current_time = int(time.time())
-            
+
             for discord_username, join_time in online_players:
-                # Update playtime
-                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?", 
+                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?",
                             (current_time - join_time, discord_username))
-                # Reset join time
-                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", 
-                            (discord_username,))
+                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", (discord_username,))
             
             conn.commit()
 
-    # Remove online role from all members who have it
-    online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-    if online_role:
-        for member in message.guild.members:
-            if online_role in member.roles and not member.bot:
-                await member.remove_roles(online_role)
+        # Remove online role only when the server stops
+        online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+        if online_role:
+            for member in message.guild.members:
+                if online_role in member.roles and not member.bot:
+                    await member.remove_roles(online_role)
+
 
 
     if "### :white_check_mark: **Server has started**" in messageContent:
@@ -461,4 +459,4 @@ async def on_command_error(ctx, error):
 
 
 # Run the bot
-bot.run('MTIzMjg0ODQxMjIzNjU3ODkwNw.G2l20t.30N6YyDdKtjS9Oa1VZXHzProupq1nyW6DFyhfY')
+bot.run('MTIzMjg0ODQxMjIzNjU3ODkwNw.Gz1axG.w60oby_5ZQ2GrWMclz0ikovLRYFhvXvfmIHWjw')
