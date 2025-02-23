@@ -5,7 +5,7 @@ import time
 
 from helperFunctions.database import initializeDatabase, addMinecraftToDiscordToDatabase
 
-from helperFunctions.const import *
+from const import *
 
 # Initialize bot with required intents
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
