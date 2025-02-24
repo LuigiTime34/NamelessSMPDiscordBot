@@ -2,13 +2,32 @@ import discord
 from discord.ext import commands
 import sqlite3
 import time
+import asyncio
 
 from helperFunctions.database import initializeDatabase, addMinecraftToDiscordToDatabase
-
 from const import *
 
 # Initialize bot with required intents
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+
+# Add a semaphore to control database access
+db_semaphore = asyncio.Semaphore(1)
+
+async def db_connect():
+    """Connect to the database with async access control"""
+    await db_semaphore.acquire()
+    try:
+        return sqlite3.connect(DATABASE_PATH)
+    except Exception as e:
+        db_semaphore.release()
+        raise e
+
+def db_close(conn):
+    """Close the database connection and release the semaphore"""
+    try:
+        conn.close()
+    finally:
+        db_semaphore.release()
 
 @bot.event
 async def on_ready():
@@ -26,9 +45,10 @@ async def on_ready():
     
     print(f'{bot.user.name} has connected to Discord!')
 
-async def updateRanksRoles(bot):
+async def updateRanksRoles(guild):
     """Update the roles for most/least deaths and advancements"""
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         
         # Only get users with deaths > 0
@@ -52,73 +72,81 @@ async def updateRanksRoles(bot):
         cursor.execute("SELECT * FROM users WHERE playtimeSeconds > 0 ORDER BY playtimeSeconds ASC LIMIT 1")
         userWithLowestPlaytime = cursor.fetchone()
 
-        # Get or create roles
-        mostDeathsRole = discord.utils.get(bot.roles, name=MOST_DEATHS_ROLE)
-        leastDeathsRole = discord.utils.get(bot.roles, name=LEAST_DEATHS_ROLE)
+        # Get roles
+        mostDeathsRole = discord.utils.get(guild.roles, name=MOST_DEATHS_ROLE)
+        leastDeathsRole = discord.utils.get(guild.roles, name=LEAST_DEATHS_ROLE)
         
-        mostAdvancementsRole = discord.utils.get(bot.roles, name=MOST_ADVANCEMENTS_ROLE)
-        leastAdvancementsRole = discord.utils.get(bot.roles, name=LEAST_ADVANCEMENTS_ROLE)
+        mostAdvancementsRole = discord.utils.get(guild.roles, name=MOST_ADVANCEMENTS_ROLE)
+        leastAdvancementsRole = discord.utils.get(guild.roles, name=LEAST_ADVANCEMENTS_ROLE)
         
-        mostPlaytimeRole = discord.utils.get(bot.roles, name=MOST_PLAYTIME_ROLE)
-        leastPlaytimeRole = discord.utils.get(bot.roles, name=LEAST_PLAYTIME_ROLE)
+        mostPlaytimeRole = discord.utils.get(guild.roles, name=MOST_PLAYTIME_ROLE)
+        leastPlaytimeRole = discord.utils.get(guild.roles, name=LEAST_PLAYTIME_ROLE)
 
         # Update roles for all members
-        for member in bot.members:
+        for member in guild.members:
+            if member.bot:
+                continue
+                
             username = member.name
 
-
             # Deaths roles
-            if username in userWithMostDeaths and mostDeathsRole:
+            if userWithMostDeaths and username == userWithMostDeaths[0] and mostDeathsRole:
                 await member.add_roles(mostDeathsRole)
             elif mostDeathsRole in member.roles:
                 await member.remove_roles(mostDeathsRole)
 
-            if username in userWithLeastDeaths and leastDeathsRole:
+            if userWithLeastDeaths and username == userWithLeastDeaths[0] and leastDeathsRole:
                 await member.add_roles(leastDeathsRole)
             elif leastDeathsRole in member.roles:
                 await member.remove_roles(leastDeathsRole)
 
-
             # Advancement roles
-            if username in userWithMostAdvancements and mostAdvancementsRole:
+            if userWithMostAdvancements and username == userWithMostAdvancements[0] and mostAdvancementsRole:
                 await member.add_roles(mostAdvancementsRole)
             elif mostAdvancementsRole in member.roles:
                 await member.remove_roles(mostAdvancementsRole)
 
-            if username in userWithLeastAdvancements and leastAdvancementsRole:
+            if userWithLeastAdvancements and username == userWithLeastAdvancements[0] and leastAdvancementsRole:
                 await member.add_roles(leastAdvancementsRole)
             elif leastAdvancementsRole in member.roles:
                 await member.remove_roles(leastAdvancementsRole)
 
-
             # Playtime roles
-            if username in userWithMostPlaytime and mostPlaytimeRole:
+            if userWithMostPlaytime and username == userWithMostPlaytime[0] and mostPlaytimeRole:
                 await member.add_roles(mostPlaytimeRole)
             elif mostPlaytimeRole in member.roles:
                 await member.remove_roles(mostPlaytimeRole)
 
-            if username in userWithLowestPlaytime and leastPlaytimeRole:
+            if userWithLowestPlaytime and username == userWithLowestPlaytime[0] and leastPlaytimeRole:
                 await member.add_roles(leastPlaytimeRole)
             elif leastPlaytimeRole in member.roles:
                 await member.remove_roles(leastPlaytimeRole)
-
-
+        
+        conn.commit()
+    finally:
+        db_close(conn)
 
 @bot.event
 async def on_message(message):
+    # Ignore messages from bots
+    if message.author.bot:
+        return
+        
     # First check playerlist command before anything else
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT serverIsOnline FROM server")
-        serverIsOnline: bool = cursor.fetchone()[0]
-    
-    if message.content.lower() == "playerlist" and not serverIsOnline:
-        await message.channel.send("Server is offline, unable to perform the command")
-        await bot.process_commands(message)
-        return  # Return here to prevent further processing
+        serverIsOnline = cursor.fetchone()[0]
+        
+        if message.content.lower() == "playerlist" and not serverIsOnline:
+            await message.channel.send("Server is offline, unable to perform the command")
+            await bot.process_commands(message)
+            return  # Return here to prevent further processing
+    finally:
+        db_close(conn)
     
     if message.channel.id != WEBHOOK_CHANNEL_ID:
-        await bot.process_commands(message)
         await bot.process_commands(message)
         return
 
@@ -126,25 +154,31 @@ async def on_message(message):
     
     discordName = message.author.name
 
-    # Only remove the online role if the server is offline
     if "### :octagonal_sign: **Server has stopped**" in messageContent:
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        conn = await db_connect()
+        try:
             cursor = conn.cursor()
+            # Update server status
             cursor.execute("UPDATE server SET serverIsOnline = 0")
-
+            
             # Get all online players and update their playtime
             cursor.execute("SELECT discordUsername, joinTime FROM users WHERE joinTime > 0")
             online_players = cursor.fetchall()
             current_time = int(time.time())
-
+            
             for discord_username, join_time in online_players:
-                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?",
+                # Update playtime
+                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?", 
                             (current_time - join_time, discord_username))
-                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", (discord_username,))
+                # Reset join time
+                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", 
+                            (discord_username,))
             
             conn.commit()
+        finally:
+            db_close(conn)
 
-        # Remove online role only when the server stops
+        # Remove online role from all members who have it
         online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
         if online_role:
             for member in message.guild.members:
@@ -152,17 +186,20 @@ async def on_message(message):
                     await member.remove_roles(online_role)
 
 
-
     if "### :white_check_mark: **Server has started**" in messageContent:
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        conn = await db_connect()
+        try:
             cursor = conn.cursor()
             cursor.execute("UPDATE server SET serverIsOnline = 1")
             conn.commit()
+        finally:
+            db_close(conn)
 
     # Handle join/leave messages
     if " joined the server" in messageContent:
         minecraftName = messageContent.split(" joined the server")[0]
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        conn = await db_connect()
+        try:
             cursor = conn.cursor()
             # First get the Discord username for this Minecraft name
             cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
@@ -180,10 +217,13 @@ async def on_message(message):
                     await message.add_reaction('✅')
                 else:
                     await message.add_reaction('❓')
+        finally:
+            db_close(conn)
 
     elif " left the server" in messageContent:
         minecraftName = messageContent.split(" left the server")[0]
-        with sqlite3.connect(DATABASE_PATH) as conn:
+        conn = await db_connect()
+        try:
             cursor = conn.cursor()
             # First get the Discord username for this Minecraft name
             cursor.execute("SELECT discordUsername, joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
@@ -191,8 +231,9 @@ async def on_message(message):
             if result:
                 discordUsername, joinTime = result
                 # Update playtime
-                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
-                            (int(time.time()) - joinTime, minecraftName))
+                if joinTime > 0:  # Make sure joinTime is valid
+                    cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
+                                (int(time.time()) - joinTime, minecraftName))
                 cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
                 conn.commit()
                 
@@ -205,77 +246,96 @@ async def on_message(message):
                     await message.add_reaction('👋')
                 else:
                     await message.add_reaction('❓')
+        finally:
+            db_close(conn)
 
     # Handle death messages
     elif messageContent.startswith(DEATH_MARKER):
-        minecraftName = messageContent.split()[1]
-        with sqlite3.connect(DATABASE_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
-            result = cursor.fetchone()
-            if result:
-                discordName = result[0]
-                # Update the users table directly - removed incorrect table reference
-                cursor.execute("UPDATE users SET deathCount = deathCount + 1 WHERE discordUsername = ?", (discordName,))
-                conn.commit()
-                await updateRanksRoles(message.guild)
+        parts = messageContent.split()
+        if len(parts) > 1:
+            minecraftName = parts[1]
+            conn = await db_connect()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+                result = cursor.fetchone()
+                if result:
+                    discordName = result[0]
+                    # Update the users table directly
+                    cursor.execute("UPDATE users SET deathCount = deathCount + 1 WHERE discordUsername = ?", (discordName,))
+                    conn.commit()
+                    await updateRanksRoles(message.guild)
+            finally:
+                db_close(conn)
 
     # Handle advancement messages
     elif messageContent.startswith(ADVANCEMENT_MARKER):
-        minecraftName = messageContent.split()[1]
-        with sqlite3.connect(DATABASE_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
-            result = cursor.fetchone()
-            if result:
-                discordName = result[0]
-                # Update the users table directly - removed incorrect table reference
-                cursor.execute("UPDATE users SET advancementCount = advancementCount + 1 WHERE discordUsername = ?", (discordName,))
-                conn.commit()
-                await updateRanksRoles(message.guild)
+        parts = messageContent.split()
+        if len(parts) > 1:
+            minecraftName = parts[1]
+            conn = await db_connect()
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+                result = cursor.fetchone()
+                if result:
+                    discordName = result[0]
+                    # Update the users table directly
+                    cursor.execute("UPDATE users SET advancementCount = advancementCount + 1 WHERE discordUsername = ?", (discordName,))
+                    conn.commit()
+                    await updateRanksRoles(message.guild)
+            finally:
+                db_close(conn)
 
     await bot.process_commands(message)
 
 @bot.command(name='deaths')
 async def deaths(ctx, user: discord.Member = None):
     user = user or ctx.author
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT deathCount FROM users WHERE discordUsername = ?", (user.name,))
         result = cursor.fetchone()
         deathCount = result[0] if result else 0
+    finally:
+        db_close(conn)
     await ctx.send(f"{user.display_name} has died {deathCount} times")
 
 @bot.command(name='advancements')
 async def advancements(ctx, user: discord.Member = None):
     user = user or ctx.author
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT advancementCount FROM users WHERE discordUsername = ?", (user.name,))
         result = cursor.fetchone()
         advCount = result[0] if result else 0
+    finally:
+        db_close(conn)
     await ctx.send(f"{user.display_name} has completed {advCount} advancements")
 
 @bot.command(name='playtime')
 async def playtime(ctx, user: discord.Member = None):
     user = user or ctx.author
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT playtimeSeconds FROM users WHERE discordUsername = ?", (user.name,))
         result = cursor.fetchone()
         playtime = result[0] if result else 0
+    finally:
+        db_close(conn)
     
     hours, remainder = divmod(playtime, 3600)
     minutes, _ = divmod(remainder, 60)
     
-    if hours == 0:
-        await ctx.send(f"{user.display_name} has played for {minutes} minute(s)")
-    
-    elif minutes == 0:
-        await ctx.send(f'{user.display_name} hasn\'t played for any time')
-    
-    else:
+    if hours > 0:
         await ctx.send(f"{user.display_name} has played for {hours} hour(s) and {minutes} minute(s)")
+    elif minutes > 0:
+        await ctx.send(f"{user.display_name} has played for {minutes} minute(s)")
+    else:
+        await ctx.send(f"{user.display_name} hasn't played for any time")
 
 @bot.command(name='addusername')
 async def addUsername(ctx, minecraftName: str, discordName: discord.Member = None):
@@ -288,8 +348,8 @@ async def addUsername(ctx, minecraftName: str, discordName: discord.Member = Non
     if discordName is None:
         discordName = ctx.author.name
     
-
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         
         cursor.execute("SELECT * FROM users WHERE discordUsername = ?", (discordName,))
@@ -306,14 +366,18 @@ async def addUsername(ctx, minecraftName: str, discordName: discord.Member = Non
         
         cursor.execute(
             """
-            INSERT INTO users (discordUsername, minecraftName) 
-            VALUES (?, ?) 
+            INSERT INTO users (discordUsername, discordDisplayName, minecraftName) 
+            VALUES (?, ?, ?) 
             ON CONFLICT (discordUsername) 
             DO UPDATE SET minecraftName = excluded.minecraftName
             """, 
-            (discordName, minecraftName)
+            (discordName, ctx.guild.get_member_named(discordName).display_name, minecraftName)
         )
         conn.commit()
+    finally:
+        db_close(conn)
+    
+    await ctx.message.add_reaction('✅')
 
 def isMod(ctx) -> bool:
     return discord.utils.get(ctx.author.roles, id=MOD_ROLE_ID) is not None
@@ -344,20 +408,21 @@ async def addHistory(ctx, user: discord.Member, statType: str, count: int):
 
     column = valid_stats[statType]
 
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         
         # Check if user exists in database
-        cursor.execute("""
-            SELECT {}, discordDisplayName, minecraftName 
+        cursor.execute(f"""
+            SELECT {column}, discordDisplayName, minecraftName 
             FROM users 
             WHERE discordUsername = ?
-        """.format(column), (user.name,))
+        """, (user.name,))
         result = cursor.fetchone()
 
         if result:
             # User exists, update the stat
-            current_count = result[0]
+            current_count = result[0] 
             cursor.execute(f"""
                 UPDATE users 
                 SET {column} = ? 
@@ -384,48 +449,59 @@ async def addHistory(ctx, user: discord.Member, statType: str, count: int):
             ))
 
         conn.commit()
+    finally:
+        db_close(conn)
     
     await ctx.message.add_reaction('✅')
 
 
 @bot.command(name='deathlist')
 async def deathList(ctx):
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, deathCount FROM users ORDER BY deathCount DESC")
         result = cursor.fetchall()
+    finally:
+        db_close(conn)
         
-        if not result:
-            await ctx.send("No death statistics recorded yet.")
-            return
+    if not result:
+        await ctx.send("No death statistics recorded yet.")
+        return
     
     message = "**Death Rankings:**\n```\n" + "\n".join(f"{name}: {count}" for name, count in result) + "\n```"
     await ctx.send(message)
 
 @bot.command(name='advancementlist')
 async def advancementList(ctx):
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, advancementCount FROM users ORDER BY advancementCount DESC")
         result = cursor.fetchall()
+    finally:
+        db_close(conn)
         
-        if not result:
-            await ctx.send("No advancement statistics recorded yet.")
-            return
+    if not result:
+        await ctx.send("No advancement statistics recorded yet.")
+        return
     
-    message = "**Advancments Rankings:**\n```\n" + "\n".join(f"{name}: {count}" for name, count in result) + "\n```"
+    message = "**Advancements Rankings:**\n```\n" + "\n".join(f"{name}: {count}" for name, count in result) + "\n```"
     await ctx.send(message)
 
 @bot.command(name='playtimelist')
 async def playtimeList(ctx):
-    with sqlite3.connect(DATABASE_PATH) as conn:
+    conn = await db_connect()
+    try:
         cursor = conn.cursor()
         cursor.execute("SELECT discordDisplayName, playtimeSeconds FROM users ORDER BY playtimeSeconds DESC")
         result = cursor.fetchall()
+    finally:
+        db_close(conn)
         
-        if not result:
-            await ctx.send("No playtime statistics recorded yet.")
-            return
+    if not result:
+        await ctx.send("No playtime statistics recorded yet.")
+        return
     
     # Build the rankings list with playtime in hours and minutes
     message = "**Playtime Rankings:**\n```\n"
@@ -456,7 +532,6 @@ async def on_command_error(ctx, error):
         await ctx.send("Missing required argument. Please check the command usage.")
     else:
         print(f'Error: {error}')
-
 
 # Run the bot
 bot.run('TOKEN')
