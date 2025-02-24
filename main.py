@@ -533,5 +533,5 @@ async def on_command_error(ctx, error):
     else:
         print(f'Error: {error}')
 
-# Run the bot
+# Run the frickin' bot
 bot.run('TOKEN')
