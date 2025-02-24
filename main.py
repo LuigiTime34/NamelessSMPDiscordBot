@@ -50,18 +50,18 @@ async def updateRanksRoles(guild):
     conn = await db_connect()
     try:
         cursor = conn.cursor()
-        
+
         # Only get users with deaths > 0
         cursor.execute("SELECT * FROM users WHERE deathCount > 0 ORDER BY deathCount DESC LIMIT 1")
         userWithMostDeaths = cursor.fetchone()
-        
-        cursor.execute("SELECT * FROM users WHERE deathCount > 0 ORDER BY deathCount ASC LIMIT 1")
+
+        cursor.execute("SELECT * FROM users WHERE deathCount > 0 AND playtimeSeconds >= 18000 ORDER BY deathCount ASC LIMIT 1")
         userWithLeastDeaths = cursor.fetchone()
-        
+
         # Only get users with advancements > 0
         cursor.execute("SELECT * FROM users WHERE advancementCount > 0 ORDER BY advancementCount DESC LIMIT 1")
         userWithMostAdvancements = cursor.fetchone()
-        
+
         cursor.execute("SELECT * FROM users WHERE advancementCount > 0 ORDER BY advancementCount ASC LIMIT 1")
         userWithLeastAdvancements = cursor.fetchone()
 
@@ -75,10 +75,10 @@ async def updateRanksRoles(guild):
         # Get roles
         mostDeathsRole = discord.utils.get(guild.roles, name=MOST_DEATHS_ROLE)
         leastDeathsRole = discord.utils.get(guild.roles, name=LEAST_DEATHS_ROLE)
-        
+
         mostAdvancementsRole = discord.utils.get(guild.roles, name=MOST_ADVANCEMENTS_ROLE)
         leastAdvancementsRole = discord.utils.get(guild.roles, name=LEAST_ADVANCEMENTS_ROLE)
-        
+
         mostPlaytimeRole = discord.utils.get(guild.roles, name=MOST_PLAYTIME_ROLE)
         leastPlaytimeRole = discord.utils.get(guild.roles, name=LEAST_PLAYTIME_ROLE)
 
@@ -86,7 +86,7 @@ async def updateRanksRoles(guild):
         for member in guild.members:
             if member.bot:
                 continue
-                
+
             username = member.name
 
             # Deaths roles
@@ -121,7 +121,7 @@ async def updateRanksRoles(guild):
                 await member.add_roles(leastPlaytimeRole)
             elif leastPlaytimeRole in member.roles:
                 await member.remove_roles(leastPlaytimeRole)
-        
+
         conn.commit()
     finally:
         db_close(conn)
