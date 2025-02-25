@@ -354,9 +354,12 @@ async def updateRanksRoles(guild):
 
 @bot.event
 async def on_message(message):
-    # Ignore messages in the scoreboard channel
-    if message.channel.id == SCOREBOARD_CHANNEL_ID:
+    # Don't delete bot's own messages in the scoreboard channel
+    if message.channel.id == SCOREBOARD_CHANNEL_ID and message.author.id != bot.user.id:
         await message.delete()
+        return
+    elif message.channel.id == SCOREBOARD_CHANNEL_ID and message.author.id == bot.user.id:
+        # Just let the bot's messages stay in the scoreboard channel
         return
         
     # First check playerlist command before anything else
