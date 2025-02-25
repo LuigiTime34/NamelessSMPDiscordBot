@@ -26,6 +26,8 @@ async def db_connect():
     try:
         return sqlite3.connect(DATABASE_PATH)
     except Exception as e:
+        print(f"Database connection error: {e}")
+        print(f"Attempted to access database at: {DATABASE_PATH}")
         db_semaphore.release()
         raise e
 
@@ -427,30 +429,52 @@ async def on_message(message):
         # Handle join/leave messages
         if " joined the server" in messageContent:
             minecraftName = messageContent.split(" joined the server")[0]
+            print(f"[DEBUG] Player joined: {minecraftName}")
+            
             conn = await db_connect()
             try:
                 cursor = conn.cursor()
                 # First get the Discord username for this Minecraft name
                 cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
                 result = cursor.fetchone()
+                
                 if result:
                     discordUsername = result[0]
+                    print(f"[DEBUG] Found Discord username: {discordUsername}")
+                    
                     # Then get the member using the correct Discord username
                     member = discord.utils.get(message.guild.members, name=discordUsername)
                     if member and not member.bot:  # Add check for bot
+                        print(f"[DEBUG] Found Discord member: {member.name}")
+                        
                         cursor.execute("UPDATE users SET joinTime = ? WHERE minecraftName = ?", (int(time.time()), minecraftName))
                         conn.commit()
+                        
                         role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
                         if role:
+                            print(f"[DEBUG] Found role: {role.name}")
                             await member.add_roles(role)
+                            print(f"[DEBUG] Added role to {member.name}")
+                        else:
+                            print(f"[DEBUG] Role '{ONLINE_ROLE_NAME}' not found")
+                        
                         await message.add_reaction('✅')
                     else:
+                        print(f"[DEBUG] Discord member not found for username: {discordUsername}")
                         await message.add_reaction('❓')
+                else:
+                    print(f"[DEBUG] No Discord mapping found for Minecraft name: {minecraftName}")
+                    # You can add automatic mapping here if desired
+                    await message.add_reaction('❓')
+            except Exception as e:
+                print(f"[ERROR] Error in join handling: {e}")
             finally:
                 db_close(conn)
 
         elif " left the server" in messageContent:
             minecraftName = messageContent.split(" left the server")[0]
+            print(f"[DEBUG] Player left: {minecraftName}")
+            
             conn = await db_connect()
             try:
                 cursor = conn.cursor()
@@ -459,6 +483,8 @@ async def on_message(message):
                 result = cursor.fetchone()
                 if result:
                     discordUsername, joinTime = result
+                    print(f"[DEBUG] Found Discord username: {discordUsername}")
+                    
                     # Update playtime
                     if joinTime > 0:  # Make sure joinTime is valid
                         cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
@@ -469,16 +495,25 @@ async def on_message(message):
                     # Get the correct member using Discord username
                     member = discord.utils.get(message.guild.members, name=discordUsername)
                     if member and not member.bot:
+                        print(f"[DEBUG] Found Discord member: {member.name}")
+                        
                         role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
                         if role and role in member.roles:
                             await member.remove_roles(role)
+                            print(f"[DEBUG] Removed role from {member.name}")
+                        
                         await message.add_reaction('👋')
                     else:
+                        print(f"[DEBUG] Discord member not found for username: {discordUsername}")
                         await message.add_reaction('❓')
                     
                     # Update scoreboard after player leaves
                     if SCOREBOARD_CHANNEL_ID:
                         await update_scoreboard()
+                else:
+                    print(f"[DEBUG] No Discord mapping found for Minecraft name: {minecraftName}")
+            except Exception as e:
+                print(f"[ERROR] Error in leave handling: {e}")
             finally:
                 db_close(conn)
 
@@ -522,6 +557,43 @@ async def on_message(message):
 
     # Process commands from any channel
     await bot.process_commands(message)
+
+# Replace the addUsername command with a modonly command to add mappings
+@bot.command(name='addmapping')
+async def addMapping(ctx, minecraftName: str, discordMember: discord.Member):
+    if not isMod(ctx):
+        await ctx.send("You don't have permission to use this command.")
+        return
+    
+    conn = await db_connect()
+    try:
+        cursor = conn.cursor()
+        
+        # Check if the Minecraft name is already mapped
+        cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+        result = cursor.fetchone()
+        if result:
+            await ctx.send(f"This Minecraft username is already mapped to Discord user: {result[0]}")
+            return
+        
+        # Insert or update the mapping
+        cursor.execute(
+            """
+            INSERT INTO users (discordUsername, discordDisplayName, minecraftName) 
+            VALUES (?, ?, ?) 
+            ON CONFLICT (discordUsername) 
+            DO UPDATE SET minecraftName = excluded.minecraftName
+            """, 
+            (discordMember.name, discordMember.display_name, minecraftName)
+        )
+        conn.commit()
+        await ctx.send(f"Successfully mapped Minecraft user '{minecraftName}' to Discord user '{discordMember.name}'")
+    finally:
+        db_close(conn)
+    
+    # Update scoreboard after adding new user
+    if SCOREBOARD_CHANNEL_ID:
+        await update_scoreboard()
 
 @bot.command(name='deaths')
 async def deaths(ctx, user: discord.Member = None):
@@ -570,52 +642,6 @@ async def playtime(ctx, user: discord.Member = None):
         await ctx.send(f"{user.display_name} has played for {minutes} minute(s)")
     else:
         await ctx.send(f"{user.display_name} hasn't played for any time")
-
-@bot.command(name='addusername')
-async def addUsername(ctx, minecraftName: str, discordName: discord.Member = None):
-    if not isMod(ctx):
-        discordName = None
-    
-    if discordName is not None:
-        discordName = discordName.name
-    
-    if discordName is None:
-        discordName = ctx.author.name
-    
-    conn = await db_connect()
-    try:
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM users WHERE discordUsername = ?", (discordName,))
-        result = cursor.fetchone()
-        if result:
-            await ctx.send("You have already registered a Minecraft username. Use !addusername to update it.")
-            return
-        
-        cursor.execute("SELECT * FROM users WHERE minecraftName = ?", (minecraftName,))
-        result = cursor.fetchone()
-        if result:
-            await ctx.send("This Minecraft username is already registered.")
-            return
-        
-        cursor.execute(
-            """
-            INSERT INTO users (discordUsername, discordDisplayName, minecraftName) 
-            VALUES (?, ?, ?) 
-            ON CONFLICT (discordUsername) 
-            DO UPDATE SET minecraftName = excluded.minecraftName
-            """, 
-            (discordName, ctx.guild.get_member_named(discordName).display_name, minecraftName)
-        )
-        conn.commit()
-    finally:
-        db_close(conn)
-    
-    await ctx.message.add_reaction('✅')
-    
-    # Update scoreboard after adding new user
-    if SCOREBOARD_CHANNEL_ID:
-        await update_scoreboard()
 
 def isMod(ctx) -> bool:
     return discord.utils.get(ctx.author.roles, id=MOD_ROLE_ID) is not None
