@@ -13,6 +13,13 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 # Add a semaphore to control database access
 db_semaphore = asyncio.Semaphore(1)
 
+# Track scoreboard messages
+scoreboard_messages = {
+    'death': None,
+    'advancement': None,
+    'playtime': None
+}
+
 async def db_connect():
     """Connect to the database with async access control"""
     await db_semaphore.acquire()
@@ -44,6 +51,221 @@ async def on_ready():
             await bot.guilds[0].create_role(name=roleName)
     
     print(f'{bot.user.name} has connected to Discord!')
+    
+    # Initialize the scoreboard
+    if SCOREBOARD_CHANNEL_ID:
+        await setup_scoreboard()
+        # Set up the scoreboard update task
+        bot.loop.create_task(update_scoreboard_periodically())
+
+async def setup_scoreboard():
+    """Initialize the scoreboard messages"""
+    scoreboard_channel = bot.get_channel(SCOREBOARD_CHANNEL_ID)
+    if not scoreboard_channel:
+        print(f"Warning: Scoreboard channel {SCOREBOARD_CHANNEL_ID} not found")
+        return
+
+    # Clear the channel
+    try:
+        await scoreboard_channel.purge()
+        print("Cleared scoreboard channel")
+    except discord.Forbidden:
+        print("Bot doesn't have permission to clear messages in the scoreboard channel")
+    except Exception as e:
+        print(f"Error clearing scoreboard channel: {e}")
+    
+    # Create new messages
+    try:
+        playtime_message = await scoreboard_channel.send("**🔄 Loading Playtime Rankings...**")
+        scoreboard_messages['playtime'] = playtime_message
+        
+        advancement_message = await scoreboard_channel.send("**🔄 Loading Advancement Rankings...**")
+        scoreboard_messages['advancement'] = advancement_message
+
+        death_message = await scoreboard_channel.send("**🔄 Loading Death Rankings...**")
+        scoreboard_messages['death'] = death_message
+        
+        print("Created new scoreboard messages")
+        
+        # Update them with actual data
+        await update_scoreboard()
+    except Exception as e:
+        print(f"Error setting up scoreboard: {e}")
+
+async def update_scoreboard():
+    """Update all scoreboard messages with current data"""
+    if not all(scoreboard_messages.values()):
+        print("Scoreboard messages not properly initialized")
+        # Potentially recreate messages here
+        return
+
+    try:
+        # Playtime Rankings
+        playtime_embed = await create_playtime_leaderboard()
+        try:
+            await scoreboard_messages['playtime'].edit(content="", embed=playtime_embed)
+        except discord.NotFound:
+            print("Playtime message not found, recreating...")
+            channel = bot.get_channel(SCOREBOARD_CHANNEL_ID)
+            if channel:
+                scoreboard_messages['playtime'] = await channel.send(embed=playtime_embed)
+        
+        # Advancement Rankings
+        advancement_embed = await create_advancement_leaderboard()
+        try:
+            await scoreboard_messages['advancement'].edit(content="", embed=advancement_embed)
+        except discord.NotFound:
+            print("Advancement message not found, recreating...")
+            channel = bot.get_channel(SCOREBOARD_CHANNEL_ID)
+            if channel:
+                scoreboard_messages['advancement'] = await channel.send(embed=advancement_embed)
+
+        # Death Rankings
+        death_embed = await create_death_leaderboard()
+        try:
+            await scoreboard_messages['death'].edit(content="", embed=death_embed)
+        except discord.NotFound:
+            print("Death message not found, recreating...")
+            channel = bot.get_channel(SCOREBOARD_CHANNEL_ID)
+            if channel:
+                scoreboard_messages['death'] = await channel.send(embed=death_embed)
+    except Exception as e:
+        print(f"Error updating scoreboard: {e}")
+
+async def update_scoreboard_periodically():
+    """Update the scoreboard at regular intervals"""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await update_scoreboard()
+        except Exception as e:
+            print(f"Error updating scoreboard: {e}")
+        await asyncio.sleep(60)  # Update every minute
+
+
+async def create_playtime_leaderboard():
+    """Create an embed for the playtime leaderboard"""
+    conn = await db_connect()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT discordDisplayName, playtimeSeconds FROM users WHERE playtimeSeconds > 0 ORDER BY playtimeSeconds DESC LIMIT 20")
+        result = cursor.fetchall()
+    finally:
+        db_close(conn)
+    
+    embed = discord.Embed(
+        title="🕒 Playtime Rankings",
+        description="Who's spending the most time on the server?",
+        color=0x3498DB  # Blue color for playtime
+    )
+    
+    if not result:
+        embed.add_field(name="No data yet", value="No playtime has been recorded")
+        return embed
+    
+    # Find the player with the most playtime for highlighting
+    most_playtime = result[0][1] if result else 0
+    
+    # Build a formatted leaderboard
+    value = ""
+    for i, (name, playtime) in enumerate(result):
+        hours, remainder = divmod(playtime, 3600)
+        minutes, _ = divmod(remainder, 60)
+        formatted_playtime = f"{hours}h {minutes}m"
+        
+        # Add medal for top 3
+        prefix = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"`{i+1}.`"
+        
+        # Highlight the player with most playtime
+        if playtime == most_playtime:
+            value += f"{prefix} **{name}**: {formatted_playtime}\n"
+        else:
+            value += f"{prefix} {name}: {formatted_playtime}\n"
+    
+    embed.add_field(name="Rankings", value=value, inline=False)
+    embed.set_footer(text=f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    return embed
+
+async def create_advancement_leaderboard():
+    """Create an embed for the advancement leaderboard"""
+    conn = await db_connect()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT discordDisplayName, advancementCount FROM users WHERE advancementCount > 0 ORDER BY advancementCount DESC LIMIT 20")
+        result = cursor.fetchall()
+    finally:
+        db_close(conn)
+    
+    embed = discord.Embed(
+        title="⭐ Advancement Rankings",
+        description="Who's making progress on the server?",
+        color=0xFFD700  # Gold color for advancements
+    )
+    
+    if not result:
+        embed.add_field(name="No data yet", value="No advancements have been recorded")
+        return embed
+    
+    # Find the player with the most advancements for highlighting
+    most_advancements = result[0][1] if result else 0
+    
+    # Build a formatted leaderboard
+    value = ""
+    for i, (name, count) in enumerate(result):
+        # Add medal for top 3
+        prefix = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"`{i+1}.`"
+        
+        # Highlight the player with most advancements
+        if count == most_advancements:
+            value += f"{prefix} **{name}**: {count} advancements\n"
+        else:
+            value += f"{prefix} {name}: {count} advancements\n"
+    
+    embed.add_field(name="Rankings", value=value, inline=False)
+    embed.set_footer(text=f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    return embed
+
+async def create_death_leaderboard():
+    """Create an embed for the death leaderboard"""
+    conn = await db_connect()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT discordDisplayName, deathCount FROM users WHERE deathCount > 0 ORDER BY deathCount ASC LIMIT 20")
+        result = cursor.fetchall()
+    finally:
+        db_close(conn)
+    
+    embed = discord.Embed(
+        title="💀 Death Rankings",
+        description="Who's dying the most on the server?",
+        color=0xFF5555  # Red color for deaths
+    )
+    
+    if not result:
+        embed.add_field(name="No data yet", value="No deaths have been recorded")
+        return embed
+    
+    # Find the player with the most deaths for highlighting
+    most_deaths = result[0][1] if result else 0
+    
+    # Build a formatted leaderboard
+    value = ""
+    for i, (name, count) in enumerate(result):
+        # Add medal for top 3
+        prefix = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"`{i+1}.`"
+        
+        # Highlight the player with most deaths
+        if count == most_deaths:
+            value += f"{prefix} **{name}**: {count} deaths\n"
+        else:
+            value += f"{prefix} {name}: {count} deaths\n"
+    
+    embed.add_field(name="Rankings", value=value, inline=False)
+    embed.set_footer(text=f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    return embed
 
 async def updateRanksRoles(guild):
     """Update the roles for most/least deaths and advancements"""
@@ -123,13 +345,18 @@ async def updateRanksRoles(guild):
                 await member.remove_roles(leastPlaytimeRole)
 
         conn.commit()
+        
+        # Update the scoreboard after updating roles
+        if SCOREBOARD_CHANNEL_ID:
+            await update_scoreboard()
     finally:
         db_close(conn)
 
 @bot.event
 async def on_message(message):
-    # Ignore messages from bots
-    if message.author.bot:
+    # Ignore messages in the scoreboard channel
+    if message.channel.id == SCOREBOARD_CHANNEL_ID:
+        await message.delete()
         return
         
     # First check playerlist command before anything else
@@ -146,147 +373,151 @@ async def on_message(message):
     finally:
         db_close(conn)
     
-    if message.channel.id != WEBHOOK_CHANNEL_ID:
-        await bot.process_commands(message)
-        return
-
-    messageContent = message.content
-    
-    discordName = message.author.name
-
-    if "### :octagonal_sign: **Server has stopped**" in messageContent:
-        conn = await db_connect()
-        try:
-            cursor = conn.cursor()
-            # Update server status
-            cursor.execute("UPDATE server SET serverIsOnline = 0")
-            
-            # Get all online players and update their playtime
-            cursor.execute("SELECT discordUsername, joinTime FROM users WHERE joinTime > 0")
-            online_players = cursor.fetchall()
-            current_time = int(time.time())
-            
-            for discord_username, join_time in online_players:
-                # Update playtime
-                cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?", 
-                            (current_time - join_time, discord_username))
-                # Reset join time
-                cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", 
-                            (discord_username,))
-            
-            conn.commit()
-        finally:
-            db_close(conn)
-
-        # Remove online role from all members who have it
-        online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-        if online_role:
-            for member in message.guild.members:
-                if online_role in member.roles and not member.bot:
-                    await member.remove_roles(online_role)
-
-
-    if "### :white_check_mark: **Server has started**" in messageContent:
-        conn = await db_connect()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE server SET serverIsOnline = 1")
-            conn.commit()
-        finally:
-            db_close(conn)
-
-    # Handle join/leave messages
-    if " joined the server" in messageContent:
-        minecraftName = messageContent.split(" joined the server")[0]
-        conn = await db_connect()
-        try:
-            cursor = conn.cursor()
-            # First get the Discord username for this Minecraft name
-            cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
-            result = cursor.fetchone()
-            if result:
-                discordUsername = result[0]
-                # Then get the member using the correct Discord username
-                member = discord.utils.get(message.guild.members, name=discordUsername)
-                if member and not member.bot:  # Add check for bot
-                    cursor.execute("UPDATE users SET joinTime = ? WHERE minecraftName = ?", (int(time.time()), minecraftName))
-                    conn.commit()
-                    role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-                    if role:
-                        await member.add_roles(role)
-                    await message.add_reaction('✅')
-                else:
-                    await message.add_reaction('❓')
-        finally:
-            db_close(conn)
-
-    elif " left the server" in messageContent:
-        minecraftName = messageContent.split(" left the server")[0]
-        conn = await db_connect()
-        try:
-            cursor = conn.cursor()
-            # First get the Discord username for this Minecraft name
-            cursor.execute("SELECT discordUsername, joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
-            result = cursor.fetchone()
-            if result:
-                discordUsername, joinTime = result
-                # Update playtime
-                if joinTime > 0:  # Make sure joinTime is valid
-                    cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
-                                (int(time.time()) - joinTime, minecraftName))
-                cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
-                conn.commit()
+    # Process Minecraft server related events only in the webhook channel
+    if message.channel.id == WEBHOOK_CHANNEL_ID:
+        messageContent = message.content
+        
+        if "### :octagonal_sign: **Server has stopped**" in messageContent:
+            conn = await db_connect()
+            try:
+                cursor = conn.cursor()
+                # Update server status
+                cursor.execute("UPDATE server SET serverIsOnline = 0")
                 
-                # Get the correct member using Discord username
-                member = discord.utils.get(message.guild.members, name=discordUsername)
-                if member and not member.bot:
-                    role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
-                    if role and role in member.roles:
-                        await member.remove_roles(role)
-                    await message.add_reaction('👋')
-                else:
-                    await message.add_reaction('❓')
-        finally:
-            db_close(conn)
-
-    # Handle death messages
-    elif messageContent.startswith(DEATH_MARKER):
-        parts = messageContent.split()
-        if len(parts) > 1:
-            minecraftName = parts[1]
-            conn = await db_connect()
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
-                result = cursor.fetchone()
-                if result:
-                    discordName = result[0]
-                    # Update the users table directly
-                    cursor.execute("UPDATE users SET deathCount = deathCount + 1 WHERE discordUsername = ?", (discordName,))
-                    conn.commit()
-                    await updateRanksRoles(message.guild)
+                # Get all online players and update their playtime
+                cursor.execute("SELECT discordUsername, joinTime FROM users WHERE joinTime > 0")
+                online_players = cursor.fetchall()
+                current_time = int(time.time())
+                
+                for discord_username, join_time in online_players:
+                    # Update playtime
+                    cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE discordUsername = ?", 
+                                (current_time - join_time, discord_username))
+                    # Reset join time
+                    cursor.execute("UPDATE users SET joinTime = 0 WHERE discordUsername = ?", 
+                                (discord_username,))
+                
+                conn.commit()
             finally:
                 db_close(conn)
 
-    # Handle advancement messages
-    elif messageContent.startswith(ADVANCEMENT_MARKER):
-        parts = messageContent.split()
-        if len(parts) > 1:
-            minecraftName = parts[1]
+            # Remove online role from all members who have it
+            online_role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+            if online_role:
+                for member in message.guild.members:
+                    if online_role in member.roles and not member.bot:
+                        await member.remove_roles(online_role)
+
+            # Update scoreboard after server stops
+            if SCOREBOARD_CHANNEL_ID:
+                await update_scoreboard()
+
+        if "### :white_check_mark: **Server has started**" in messageContent:
             conn = await db_connect()
             try:
                 cursor = conn.cursor()
-                cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
-                result = cursor.fetchone()
-                if result:
-                    discordName = result[0]
-                    # Update the users table directly
-                    cursor.execute("UPDATE users SET advancementCount = advancementCount + 1 WHERE discordUsername = ?", (discordName,))
-                    conn.commit()
-                    await updateRanksRoles(message.guild)
+                cursor.execute("UPDATE server SET serverIsOnline = 1")
+                conn.commit()
             finally:
                 db_close(conn)
 
+        # Handle join/leave messages
+        if " joined the server" in messageContent:
+            minecraftName = messageContent.split(" joined the server")[0]
+            conn = await db_connect()
+            try:
+                cursor = conn.cursor()
+                # First get the Discord username for this Minecraft name
+                cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+                result = cursor.fetchone()
+                if result:
+                    discordUsername = result[0]
+                    # Then get the member using the correct Discord username
+                    member = discord.utils.get(message.guild.members, name=discordUsername)
+                    if member and not member.bot:  # Add check for bot
+                        cursor.execute("UPDATE users SET joinTime = ? WHERE minecraftName = ?", (int(time.time()), minecraftName))
+                        conn.commit()
+                        role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+                        if role:
+                            await member.add_roles(role)
+                        await message.add_reaction('✅')
+                    else:
+                        await message.add_reaction('❓')
+            finally:
+                db_close(conn)
+
+        elif " left the server" in messageContent:
+            minecraftName = messageContent.split(" left the server")[0]
+            conn = await db_connect()
+            try:
+                cursor = conn.cursor()
+                # First get the Discord username for this Minecraft name
+                cursor.execute("SELECT discordUsername, joinTime FROM users WHERE minecraftName = ?", (minecraftName,))
+                result = cursor.fetchone()
+                if result:
+                    discordUsername, joinTime = result
+                    # Update playtime
+                    if joinTime > 0:  # Make sure joinTime is valid
+                        cursor.execute("UPDATE users SET playtimeSeconds = playtimeSeconds + ? WHERE minecraftName = ?", 
+                                    (int(time.time()) - joinTime, minecraftName))
+                    cursor.execute("UPDATE users SET joinTime = 0 WHERE minecraftName = ?", (minecraftName,))
+                    conn.commit()
+                    
+                    # Get the correct member using Discord username
+                    member = discord.utils.get(message.guild.members, name=discordUsername)
+                    if member and not member.bot:
+                        role = discord.utils.get(message.guild.roles, name=ONLINE_ROLE_NAME)
+                        if role and role in member.roles:
+                            await member.remove_roles(role)
+                        await message.add_reaction('👋')
+                    else:
+                        await message.add_reaction('❓')
+                    
+                    # Update scoreboard after player leaves
+                    if SCOREBOARD_CHANNEL_ID:
+                        await update_scoreboard()
+            finally:
+                db_close(conn)
+
+        # Handle death messages
+        elif messageContent.startswith(DEATH_MARKER):
+            parts = messageContent.split()
+            if len(parts) > 1:
+                minecraftName = parts[1]
+                conn = await db_connect()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+                    result = cursor.fetchone()
+                    if result:
+                        discordName = result[0]
+                        # Update the users table directly
+                        cursor.execute("UPDATE users SET deathCount = deathCount + 1 WHERE discordUsername = ?", (discordName,))
+                        conn.commit()
+                        await updateRanksRoles(message.guild)
+                finally:
+                    db_close(conn)
+
+        # Handle advancement messages
+        elif messageContent.startswith(ADVANCEMENT_MARKER):
+            parts = messageContent.split()
+            if len(parts) > 1:
+                minecraftName = parts[1]
+                conn = await db_connect()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT discordUsername FROM users WHERE minecraftName = ?", (minecraftName,))
+                    result = cursor.fetchone()
+                    if result:
+                        discordName = result[0]
+                        # Update the users table directly
+                        cursor.execute("UPDATE users SET advancementCount = advancementCount + 1 WHERE discordUsername = ?", (discordName,))
+                        conn.commit()
+                        await updateRanksRoles(message.guild)
+                finally:
+                    db_close(conn)
+
+    # Process commands from any channel
     await bot.process_commands(message)
 
 @bot.command(name='deaths')
@@ -378,6 +609,10 @@ async def addUsername(ctx, minecraftName: str, discordName: discord.Member = Non
         db_close(conn)
     
     await ctx.message.add_reaction('✅')
+    
+    # Update scoreboard after adding new user
+    if SCOREBOARD_CHANNEL_ID:
+        await update_scoreboard()
 
 def isMod(ctx) -> bool:
     return discord.utils.get(ctx.author.roles, id=MOD_ROLE_ID) is not None
@@ -453,7 +688,10 @@ async def addHistory(ctx, user: discord.Member, statType: str, count: int):
         db_close(conn)
     
     await ctx.message.add_reaction('✅')
-
+    
+    # Update scoreboard after adding history
+    if SCOREBOARD_CHANNEL_ID:
+        await update_scoreboard()
 
 @bot.command(name='deathlist')
 async def deathList(ctx):
@@ -523,6 +761,18 @@ async def updateroles(ctx):
     
     await updateRanksRoles(ctx.guild)
     await ctx.message.add_reaction('✅')
+
+@bot.command(name='updatescoreboard')
+async def updatescoreboard(ctx):
+    if not isMod(ctx):
+        await ctx.send("You don't have permission to use this command.")
+        return
+    
+    if SCOREBOARD_CHANNEL_ID:
+        await update_scoreboard()
+        await ctx.message.add_reaction('✅')
+    else:
+        await ctx.send("Scoreboard channel is not configured.")
 
 @bot.event
 async def on_command_error(ctx, error):
