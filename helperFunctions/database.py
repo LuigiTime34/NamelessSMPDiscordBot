@@ -61,7 +61,7 @@ if __name__ == "__main__":
     "BigSharkyBRo": "car248.",
     "Brandonslay": "ctslayer.",
     "ItzT1g3r": "greattigergaming",
-    "the_rock_gaming": "the_rock_gaming",
+    "The_Rock_Gaming": "the_rock_gaming",
     "THERYZEN7": "asillygooberguy",
     "spleeftrappedlol": "neoptolemus_"
 }

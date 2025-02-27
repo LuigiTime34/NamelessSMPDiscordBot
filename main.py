@@ -813,4 +813,6 @@ async def on_command_error(ctx, error):
         print(f'Error: {error}')
 
 # Run the frickin' bot
-bot.run('TOKEN')
+with open('token.txt', 'r') as f:
+    TOKEN = f.readline().strip()
+bot.run(TOKEN)
