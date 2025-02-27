@@ -15,7 +15,7 @@ SCOREBOARD_CHANNEL_ID = 1343755601070657566
 MOST_DEATHS_ROLE = "💀 Skill Issue"
 ROLES.append(MOST_DEATHS_ROLE)
 
-LEAST_DEATHS_ROLE = "🎮 Pro gamer"
+LEAST_DEATHS_ROLE = "👷‍♂️ Safety First"
 ROLES.append(LEAST_DEATHS_ROLE)
 
 MOST_ADVANCEMENTS_ROLE = "👑 Overachiever"
@@ -48,7 +48,7 @@ MINECRAFT_TO_DISCORD = {
     "BigSharkyBRo": "car248.",
     "Brandonslay": "ctslayer.",
     "ItzT1g3r": "greattigergaming",
-    "the_rock_gaming": "the_rock_gaming",
+    "The_Rock_Gaming": "the_rock_gaming",
     "THERYZEN7": "asillygooberguy",
     "spleeftrappedlol": "neoptolemus_"
 }
