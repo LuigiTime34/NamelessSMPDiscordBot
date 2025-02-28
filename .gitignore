@@ -20,6 +20,10 @@ wheels/
 .installed.cfg
 *.egg
 token.txt
+commands/
+databse/
+tasks/
+utils/
 
 # Virtual Environment
 venv/
