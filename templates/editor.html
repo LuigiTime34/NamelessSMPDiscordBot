@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Player Stat Editor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            gap: 20px;
+            background-color: #1e1e2f;
+            color: #ffffff;
+            padding: 20px;
+        }
+        #editor {
+            flex: 2;
+        }
+        #output-container {
+            flex: 1;
+            border-left: 2px solid #444;
+            padding-left: 20px;
+        }
+        textarea {
+            width: 100%;
+            background-color: #2b2b3d;
+            color: #ffffff;
+            border: none;
+            padding: 10px;
+        }
+        button {
+            background-color: #444;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #555;
+        }
+    </style>
+    <script>
+        async function updatePlayer(name) {
+            const formData = new FormData();
+            formData.append('original_data', document.getElementById(`original-${name}`).value);
+            formData.append('name', name);
+            formData.append('deaths', document.getElementById(`deaths-${name}`).value);
+            formData.append('advancements', document.getElementById(`advancements-${name}`).value);
+            formData.append('playtime', document.getElementById(`playtime-${name}`).value);
+
+            const response = await fetch('/update', { method: 'POST', body: formData });
+            const result = await response.json();
+
+            document.getElementById('output').textContent = result.output;
+        }
+
+        function copyToClipboard() {
+            const outputText = document.getElementById('output').textContent;
+            navigator.clipboard.writeText(outputText).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+    </script>
+</head>
+<body>
+    <div id="editor">
+        <h1>Player Stat Editor</h1>
+        {% for player in players %}
+            <div>
+                <h3>{{ player.name }}</h3>
+                <input type="hidden" id="original-{{ player.name }}" value="{{ player.name }}: deaths={{ player.deaths }}, advancements={{ player.advancements }}, playtime={{ player.playtime }}">
+                Deaths: <input type="number" id="deaths-{{ player.name }}" value="{{ player.deaths }}" oninput="updatePlayer('{{ player.name }}')"><br>
+                Advancements: <input type="number" id="advancements-{{ player.name }}" value="{{ player.advancements }}" oninput="updatePlayer('{{ player.name }}')"><br>
+                Playtime: <input type="number" id="playtime-{{ player.name }}" value="{{ player.playtime }}" oninput="updatePlayer('{{ player.name }}')"><br>
+            </div>
+            <hr>
+        {% endfor %}
+    </div>
+    <div id="output-container">
+        <h2>Updated Values:</h2>
+        <pre id="output"></pre>
+        <button onclick="copyToClipboard()">Copy to Clipboard</button>
+    </div>
+</body>
+</html>
