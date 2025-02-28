@@ -21,7 +21,7 @@ wheels/
 *.egg
 token.txt
 commands/
-databse/
+database/
 tasks/
 utils/
 
