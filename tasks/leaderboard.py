@@ -1,14 +1,14 @@
 import discord
 import asyncio
 import datetime
-from database.queries import get_all_deaths, get_all_advancements, get_all_playtimes
+from database.queries import get_all_playtimes, get_all_advancements, get_all_deaths
 from utils.formatters import format_playtime
 from const import SCOREBOARD_CHANNEL_ID
 
-# Global variable to store leaderboard messages
+# Global variable
 leaderboard_messages = {'deaths': None, 'advancements': None, 'playtime': None}
 
-async def update_leaderboards(channel):
+async def update_leaderboards(bot, channel):
     """Update the leaderboard messages in the designated channel."""
     global leaderboard_messages
     
@@ -24,7 +24,7 @@ async def update_leaderboards(channel):
     
     if playtime_data:
         value = ""
-        for i, (mc_name, _, seconds) in enumerate(playtime_data):
+        for i, (mc_name, _, seconds) in enumerate(playtime_data):  # Top 10
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {format_playtime(seconds)}\n"
         playtime_embed.add_field(name="Most Playtime", value=value, inline=False)
@@ -40,7 +40,7 @@ async def update_leaderboards(channel):
     
     if adv_data:
         value = ""
-        for i, (mc_name, _, advancements) in enumerate(adv_data):
+        for i, (mc_name, _, advancements) in enumerate(adv_data):  # Top 10
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {advancements} advancements\n"
         adv_embed.add_field(name="Most Advancements", value=value, inline=False)
@@ -56,65 +56,57 @@ async def update_leaderboards(channel):
     
     if deaths_data:
         value = ""
-        for i, (mc_name, _, deaths) in enumerate(deaths_data):
+        for i, (mc_name, _, deaths) in enumerate(deaths_data):  # Top 10
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {deaths} deaths\n"
         deaths_embed.add_field(name="Least Deaths", value=value, inline=False)
         deaths_embed.set_footer(text="Updated: " + datetime.datetime.now().strftime("%H:%M:%S"))
     
-    # Update or send new messages
+    # Initialize or update leaderboard messages
     try:
-        # Check if we have existing messages and try to update them
-        if leaderboard_messages['playtime'] and isinstance(leaderboard_messages['playtime'], discord.Message):
-            try:
-                await leaderboard_messages['playtime'].edit(embed=playtime_embed)
-            except discord.NotFound:
-                # Message was deleted, create a new one
-                leaderboard_messages['playtime'] = await channel.send(embed=playtime_embed)
-        else:
-            # Try to find existing message first
-            async for message in channel.history(limit=15):
-                if message.author.id == channel.guild.me.id and message.embeds and "Playtime Leaderboard" in message.embeds[0].title:
-                    leaderboard_messages['playtime'] = message
-                    await message.edit(embed=playtime_embed)
-                    break
+        # First time setup - if no messages exist, create them
+        if not all(leaderboard_messages.values()):
+            # Check if there are existing messages we can use
+            existing_messages = []
+            async for message in channel.history(limit=10):
+                if message.author == bot.user:
+                    existing_messages.append(message)
+            
+            # Use existing messages if available (newest first)
+            if len(existing_messages) >= 3:
+                leaderboard_messages['deaths'] = existing_messages[0]
+                leaderboard_messages['advancements'] = existing_messages[1]
+                leaderboard_messages['playtime'] = existing_messages[2]
             else:
-                # No existing message found, create a new one
-                leaderboard_messages['playtime'] = await channel.send(embed=playtime_embed)
+                # Create new messages if needed
+                if not leaderboard_messages['playtime']:
+                    leaderboard_messages['playtime'] = await channel.send(embed=playtime_embed)
+                if not leaderboard_messages['advancements']:
+                    leaderboard_messages['advancements'] = await channel.send(embed=adv_embed)
+                if not leaderboard_messages['deaths']:
+                    leaderboard_messages['deaths'] = await channel.send(embed=deaths_embed)
         
-        # Similar approach for advancements
-        if leaderboard_messages['advancements'] and isinstance(leaderboard_messages['advancements'], discord.Message):
-            try:
-                await leaderboard_messages['advancements'].edit(embed=adv_embed)
-            except discord.NotFound:
-                leaderboard_messages['advancements'] = await channel.send(embed=adv_embed)
-        else:
-            async for message in channel.history(limit=15):
-                if message.author.id == channel.guild.me.id and message.embeds and "Advancements Leaderboard" in message.embeds[0].title:
-                    leaderboard_messages['advancements'] = message
-                    await message.edit(embed=adv_embed)
-                    break
-            else:
-                leaderboard_messages['advancements'] = await channel.send(embed=adv_embed)
-        
-        # And for deaths
-        if leaderboard_messages['deaths'] and isinstance(leaderboard_messages['deaths'], discord.Message):
-            try:
-                await leaderboard_messages['deaths'].edit(embed=deaths_embed)
-            except discord.NotFound:
-                leaderboard_messages['deaths'] = await channel.send(embed=deaths_embed)
-        else:
-            async for message in channel.history(limit=15):
-                if message.author.id == channel.guild.me.id and message.embeds and "Deaths Leaderboard" in message.embeds[0].title:
-                    leaderboard_messages['deaths'] = message
-                    await message.edit(embed=deaths_embed)
-                    break
-            else:
-                leaderboard_messages['deaths'] = await channel.send(embed=deaths_embed)
+        # Update existing messages
+        if leaderboard_messages['playtime']:
+            await leaderboard_messages['playtime'].edit(embed=playtime_embed)
+        if leaderboard_messages['advancements']:
+            await leaderboard_messages['advancements'].edit(embed=adv_embed)
+        if leaderboard_messages['deaths']:
+            await leaderboard_messages['deaths'].edit(embed=deaths_embed)
         
         print("Updated leaderboards successfully")
     except Exception as e:
         print(f"Error updating leaderboards: {e}")
+        # If editing failed, try to send new messages
+        try:
+            if leaderboard_messages['playtime']:
+                leaderboard_messages['playtime'] = await channel.send(embed=playtime_embed)
+            if leaderboard_messages['advancements']:
+                leaderboard_messages['advancements'] = await channel.send(embed=adv_embed)
+            if leaderboard_messages['deaths']:
+                leaderboard_messages['deaths'] = await channel.send(embed=deaths_embed)
+        except Exception as e2:
+            print(f"Failed to recover from leaderboard update error: {e2}")
 
 async def leaderboard_update_task(bot):
     """Update leaderboards every minute."""
@@ -127,7 +119,7 @@ async def leaderboard_update_task(bot):
     
     while not bot.is_closed():
         try:
-            await update_leaderboards(channel)
+            await update_leaderboards(bot, channel)
         except Exception as e:
             print(f"Error in leaderboard update task: {e}")
         

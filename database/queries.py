@@ -1,11 +1,49 @@
+import sqlite3
 import datetime
-from database.connection import get_db_connection
-from const import MINECRAFT_TO_DISCORD
+from const import DATABASE_PATH, MINECRAFT_TO_DISCORD
+from database.connection import get_connection
+
+def initialize_database():
+    """Create database tables if they don't exist."""
+    print(f"Initializing database at {DATABASE_PATH}")
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Main stats table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS player_stats (
+        minecraft_username TEXT PRIMARY KEY,
+        discord_username TEXT,
+        deaths INTEGER DEFAULT 0,
+        advancements INTEGER DEFAULT 0,
+        playtime_seconds INTEGER DEFAULT 0
+    )
+    ''')
+    
+    # Tracking table for online players
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS online_players (
+        minecraft_username TEXT PRIMARY KEY,
+        login_time INTEGER
+    )
+    ''')
+    
+    # Initialize all players from the mapping with default values
+    for mc_username, disc_username in MINECRAFT_TO_DISCORD.items():
+        cursor.execute('''
+        INSERT OR IGNORE INTO player_stats 
+        (minecraft_username, discord_username, deaths, advancements, playtime_seconds) 
+        VALUES (?, ?, 0, 0, 0)
+        ''', (mc_username, disc_username))
+    
+    conn.commit()
+    conn.close()
+    print("Database initialized!")
 
 def record_death(minecraft_username):
     """Increment death count for a player."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE player_stats SET deaths = deaths + 1 WHERE minecraft_username = ?", 
@@ -20,7 +58,7 @@ def record_death(minecraft_username):
 def record_advancement(minecraft_username):
     """Increment advancement count for a player."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE player_stats SET advancements = advancements + 1 WHERE minecraft_username = ?", 
@@ -35,7 +73,7 @@ def record_advancement(minecraft_username):
 def record_login(minecraft_username):
     """Record when a player logs in."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         current_time = int(datetime.datetime.now().timestamp())
         cursor.execute(
@@ -51,7 +89,7 @@ def record_login(minecraft_username):
 def record_logout(minecraft_username):
     """Record when a player logs out and update playtime."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         # Get login time
@@ -92,7 +130,7 @@ def record_logout(minecraft_username):
 def get_player_stats(minecraft_username=None, discord_username=None):
     """Get stats for a player by minecraft or discord username."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         if minecraft_username:
@@ -118,7 +156,7 @@ def get_player_stats(minecraft_username=None, discord_username=None):
 def get_all_players():
     """Get stats for all players."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM player_stats")
         result = cursor.fetchall()
@@ -131,7 +169,7 @@ def get_all_players():
 def get_all_deaths():
     """Get all player death counts sorted from lowest to highest."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT minecraft_username, discord_username, deaths FROM player_stats ORDER BY deaths ASC"
@@ -146,7 +184,7 @@ def get_all_deaths():
 def get_all_advancements():
     """Get all player advancement counts sorted from highest to lowest."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT minecraft_username, discord_username, advancements FROM player_stats ORDER BY advancements DESC"
@@ -161,7 +199,7 @@ def get_all_advancements():
 def get_all_playtimes():
     """Get all player playtimes sorted from highest to lowest."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT minecraft_username, discord_username, playtime_seconds FROM player_stats ORDER BY playtime_seconds DESC"
@@ -176,7 +214,7 @@ def get_all_playtimes():
 def get_online_players_db():
     """Get list of currently online players from the database."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT minecraft_username FROM online_players")
         result = cursor.fetchall()
@@ -189,7 +227,7 @@ def get_online_players_db():
 def clear_online_players():
     """Clear all online players and update playtimes."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         # Get all online players
@@ -222,7 +260,7 @@ def clear_online_players():
 def bulk_update_history(updates):
     """Update player stats in bulk from provided dictionary."""
     try:
-        conn = get_db_connection()
+        conn = get_connection()
         cursor = conn.cursor()
         
         for minecraft_username, stats in updates.items():
@@ -251,10 +289,3 @@ def bulk_update_history(updates):
     except Exception as e:
         print(f"Error updating history: {e}")
         return False
-
-def get_minecraft_from_discord(discord_name):
-    """Get Minecraft username from Discord username."""
-    for mc_name, disc_name in MINECRAFT_TO_DISCORD.items():
-        if disc_name.lower() == discord_name.lower():
-            return mc_name
-    return None
