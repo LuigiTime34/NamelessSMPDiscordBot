@@ -50,7 +50,7 @@ MINECRAFT_TO_DISCORD = {
     "ItzT1g3r": "greattigergaming",
     "The_Rock_Gaming": "the_rock_gaming",
     "THERYZEN7": "asillygooberguy",
-    "spleeftrappedlol": "neoptolemus_"
+    "SpleefTrappedLOL": "neoptolemus_"
 }
 
 # Special characters for detecting death and advancement messages
