@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import re
-import os
+import subprocess
 
 # Import from our modules
 from const import (
@@ -33,11 +33,17 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 server_online = False
 online_players = []
 
+# Dead bots for henry and bear
+def run_idle_bots():
+    subprocess.Popen(["python", "run_bear.py"])
+    subprocess.Popen(["python", "run_henry.py"])
+
 # Bot event handlers
 @bot.event
 async def on_ready():
     """When bot is ready, initialize everything."""
     print(f'Bot is ready! Logged in as {bot.user}')
+    run_idle_bots()
     
     # Initialize database
     initialize_database()

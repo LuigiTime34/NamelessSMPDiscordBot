@@ -13,12 +13,13 @@ async def update_leaderboards(bot, channel):
     global leaderboard_messages
     
     # Create embeds
-    
+    current_time = int(datetime.datetime.now().timestamp())
+
     # Playtime leaderboard
     playtime_data = get_all_playtimes()
     playtime_embed = discord.Embed(
         title="🕒 Playtime Leaderboard",
-        description="Who's spending their life on the server?",
+        description=f"Who's spending their life on the server?\nUpdated: <t:{current_time}:T>",
         color=discord.Color.green()
     )
     
@@ -28,15 +29,13 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {format_playtime(seconds)}\n"
         playtime_embed.add_field(name="Most Playtime", value=value, inline=False)
-        current_time = datetime.datetime.now()
-        timestamp_str = discord.utils.format_dt(current_time, style="t")
-        playtime_embed.set_footer(text=f"Updated: {timestamp_str}")
     
     # Advancements leaderboard
     adv_data = get_all_advancements()
+    current_time = int(datetime.datetime.now().timestamp())
     adv_embed = discord.Embed(
         title="⭐ Advancements Leaderboard",
-        description="Who's been busy progressing?",
+        description=f"Who's been busy progressing?\nUpdated: <t:{current_time}:T>",
         color=discord.Color.gold()
     )
     
@@ -46,15 +45,13 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {advancements} advancements\n"
         adv_embed.add_field(name="Most Advancements", value=value, inline=False)
-        current_time = datetime.datetime.now()
-        timestamp_str = discord.utils.format_dt(current_time, style="t")
-        adv_embed.set_footer(text=f"Updated: {timestamp_str}")
     
     # Deaths leaderboard
     deaths_data = get_all_deaths()
+    current_time = int(datetime.datetime.now().timestamp())
     deaths_embed = discord.Embed(
         title="💀 Deaths Leaderboard",
-        description="Who's been playing it safe?",
+        description=f"Who's been playing it safe?\nUpdated: <t:{current_time}:T>",
         color=discord.Color.red()
     )
     
@@ -64,9 +61,6 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {deaths} deaths\n"
         deaths_embed.add_field(name="Least Deaths", value=value, inline=False)
-        current_time = datetime.datetime.now()
-        timestamp_str = discord.utils.format_dt(current_time, style="t")
-        deaths_embed.set_footer(text=f"Updated: {timestamp_str}")
     
     # Initialize or update leaderboard messages
     try:

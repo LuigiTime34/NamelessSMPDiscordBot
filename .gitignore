@@ -20,6 +20,8 @@ wheels/
 .installed.cfg
 *.egg
 token.txt
+bear_token.txt
+henry_token.txt
 
 # Virtual Environment
 venv/
