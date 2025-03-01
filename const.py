@@ -46,7 +46,7 @@ MINECRAFT_TO_DISCORD = {
     "MindJames": "mindjames_93738",
     "therealgoos": "therealgoos",
     "BigSharkyBRo": "car248.",
-    "Brandonslay": "ctslayer.",
+    "brandonslay": "ctslayer.",
     "ItzT1g3r": "greattigergaming",
     "The_Rock_Gaming": "the_rock_gaming",
     "THERYZEN7": "asillygooberguy",

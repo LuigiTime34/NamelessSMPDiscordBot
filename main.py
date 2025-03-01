@@ -75,13 +75,13 @@ async def on_message(message):
         # Server status messages
         if ":white_check_mark: **Server has started**" in message.content:
             server_online = True
-            # await message.add_reaction('✅')
+            await message.add_reaction('✅')
             await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Server is online! (0 players)"))
             print("Server has started!")
             
         elif ":octagonal_sign: **Server has stopped**" in message.content:
             server_online = False
-            # await message.add_reaction('✅')
+            await message.add_reaction('🛑')
             
             # Update playtime for all online players
             clear_online_players()
