@@ -28,7 +28,8 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {format_playtime(seconds)}\n"
         playtime_embed.add_field(name="Most Playtime", value=value, inline=False)
-        playtime_embed.set_footer(text="Updated: " + datetime.datetime.now().strftime("%H:%M:%S"))
+        current_time = int(datetime.datetime.now().timestamp())
+        playtime_embed.set_footer(text=f"Updated: <t:{current_time}:T>")
     
     # Advancements leaderboard
     adv_data = get_all_advancements()
@@ -44,7 +45,8 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {advancements} advancements\n"
         adv_embed.add_field(name="Most Advancements", value=value, inline=False)
-        adv_embed.set_footer(text="Updated: " + datetime.datetime.now().strftime("%H:%M:%S"))
+        current_time = int(datetime.datetime.now().timestamp())
+        adv_embed.set_footer(text=f"Updated: <t:{current_time}:T>")
     
     # Deaths leaderboard
     deaths_data = get_all_deaths()
@@ -60,7 +62,8 @@ async def update_leaderboards(bot, channel):
             medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             value += f"{medal} **`{mc_name}`**: {deaths} deaths\n"
         deaths_embed.add_field(name="Least Deaths", value=value, inline=False)
-        deaths_embed.set_footer(text="Updated: " + datetime.datetime.now().strftime("%H:%M:%S"))
+        current_time = int(datetime.datetime.now().timestamp())
+        deaths_embed.set_footer(text=f"Updated: <t:{current_time}:T>")
     
     # Initialize or update leaderboard messages
     try:
