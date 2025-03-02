@@ -202,14 +202,19 @@ async def on_message(message):
                     await message.add_reaction('❓')
                     print(f"Unknown player died: {minecraft_username}")
         
-        # Advancement messages - also check for both formats
+        # Inside your advancement message handler
         elif message.content.startswith(ADVANCEMENT_MARKER) or ADVANCEMENT_MARKER in message.content:
             match = re.search(f"{ADVANCEMENT_MARKER} \*\*(.*?)\*\*", message.content)
             if not match:
                 match = re.search(f"{ADVANCEMENT_MARKER} (.*?)[^\w]", message.content)
             
             if match:
-                minecraft_username = match.group(1).replace("\\", "")
+                # Get the raw username with possible escape characters
+                raw_username = match.group(1)
+                
+                # Remove all backslashes used for escaping
+                minecraft_username = raw_username.replace("\\", "")
+                
                 await message.add_reaction(ADVANCEMENT_MARKER)
                 
                 if minecraft_username in MINECRAFT_TO_DISCORD:
@@ -217,7 +222,7 @@ async def on_message(message):
                     print(f"{minecraft_username} got an advancement")
                 else:
                     await message.add_reaction('❓')
-                    print(f"Unknown player got advancement: {minecraft_username}")
+                    print(f"Unknown player got advancement: {minecraft_username} (original: {raw_username})")
     
     # Handle playerlist command when server is offline
     if not server_online and message.content.strip() == "playerlist":
