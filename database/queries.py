@@ -2,10 +2,11 @@ import sqlite3
 import datetime
 from const import DATABASE_PATH, MINECRAFT_TO_DISCORD
 from database.connection import get_connection
+from utils.logging import log
 
 def initialize_database():
     """Create database tables if they don't exist."""
-    print(f"Initializing database at {DATABASE_PATH}")
+    log(f"Initializing database at {DATABASE_PATH}")
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -38,7 +39,7 @@ def initialize_database():
     
     conn.commit()
     conn.close()
-    print("Database initialized!")
+    log("Database initialized!")
 
 def record_death(minecraft_username):
     """Increment death count for a player."""
@@ -51,9 +52,9 @@ def record_death(minecraft_username):
         )
         conn.commit()
         conn.close()
-        print(f"Recorded death for {minecraft_username}")
+        log(f"Recorded death for {minecraft_username}")
     except Exception as e:
-        print(f"Error recording death: {e}")
+        log(f"Error recording death: {e}")
 
 def record_advancement(minecraft_username):
     """Increment advancement count for a player."""
@@ -66,9 +67,9 @@ def record_advancement(minecraft_username):
         )
         conn.commit()
         conn.close()
-        print(f"Recorded advancement for {minecraft_username}")
+        log(f"Recorded advancement for {minecraft_username}")
     except Exception as e:
-        print(f"Error recording advancement: {e}")
+        log(f"Error recording advancement: {e}")
 
 def record_login(minecraft_username):
     """Record when a player logs in."""
@@ -82,9 +83,9 @@ def record_login(minecraft_username):
         )
         conn.commit()
         conn.close()
-        print(f"Recorded login for {minecraft_username} at {current_time}")
+        log(f"Recorded login for {minecraft_username} at {current_time}")
     except Exception as e:
-        print(f"Error recording login: {e}")
+        log(f"Error recording login: {e}")
 
 def record_logout(minecraft_username):
     """Record when a player logs out and update playtime."""
@@ -117,14 +118,14 @@ def record_logout(minecraft_username):
             )
             
             conn.commit()
-            print(f"Recorded logout for {minecraft_username}, added {playtime} seconds")
+            log(f"Recorded logout for {minecraft_username}, added {playtime} seconds")
         else:
-            print(f"No login record found for {minecraft_username}")
+            log(f"No login record found for {minecraft_username}")
         
         conn.close()
         return playtime if result else 0
     except Exception as e:
-        print(f"Error recording logout: {e}")
+        log(f"Error recording logout: {e}")
         return 0
 
 def get_player_stats(minecraft_username=None, discord_username=None):
@@ -150,7 +151,7 @@ def get_player_stats(minecraft_username=None, discord_username=None):
         conn.close()
         return result
     except Exception as e:
-        print(f"Error getting player stats: {e}")
+        log(f"Error getting player stats: {e}")
         return None
 
 def get_all_players():
@@ -163,7 +164,7 @@ def get_all_players():
         conn.close()
         return result
     except Exception as e:
-        print(f"Error getting all players: {e}")
+        log(f"Error getting all players: {e}")
         return []
 
 def get_all_deaths():
@@ -178,7 +179,7 @@ def get_all_deaths():
         conn.close()
         return result
     except Exception as e:
-        print(f"Error getting death counts: {e}")
+        log(f"Error getting death counts: {e}")
         return []
 
 def get_all_advancements():
@@ -193,7 +194,7 @@ def get_all_advancements():
         conn.close()
         return result
     except Exception as e:
-        print(f"Error getting advancement counts: {e}")
+        log(f"Error getting advancement counts: {e}")
         return []
 
 def get_all_playtimes():
@@ -208,7 +209,7 @@ def get_all_playtimes():
         conn.close()
         return result
     except Exception as e:
-        print(f"Error getting playtimes: {e}")
+        log(f"Error getting playtimes: {e}")
         return []
 
 def get_online_players_db():
@@ -221,7 +222,7 @@ def get_online_players_db():
         conn.close()
         return [player[0] for player in result]
     except Exception as e:
-        print(f"Error getting online players: {e}")
+        log(f"Error getting online players: {e}")
         return []
 
 def clear_online_players():
@@ -246,16 +247,16 @@ def clear_online_players():
                 (playtime, minecraft_username)
             )
             
-            print(f"Added {playtime} seconds to {minecraft_username}")
+            log(f"Added {playtime} seconds to {minecraft_username}")
         
         # Clear the online players table
         cursor.execute("DELETE FROM online_players")
         
         conn.commit()
         conn.close()
-        print(f"Cleared {len(players)} online players")
+        log(f"Cleared {len(players)} online players")
     except Exception as e:
-        print(f"Error clearing online players: {e}")
+        log(f"Error clearing online players: {e}")
 
 def bulk_update_history(updates):
     """Update player stats in bulk from provided dictionary."""
@@ -284,8 +285,8 @@ def bulk_update_history(updates):
         
         conn.commit()
         conn.close()
-        print(f"Bulk updated history for {len(updates)} players")
+        log(f"Bulk updated history for {len(updates)} players")
         return True
     except Exception as e:
-        print(f"Error updating history: {e}")
+        log(f"Error updating history: {e}")
         return False
