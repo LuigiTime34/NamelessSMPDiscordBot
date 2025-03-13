@@ -1,32 +1,40 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import re
 import subprocess
 import random
 import asyncio
 import datetime
+import logging
 
 # Import from our modules
 from const import (
     DATABASE_PATH, ROLES, ONLINE_ROLE_NAME, WEBHOOK_CHANNEL_ID, MOD_ROLE_ID,
-    SCOREBOARD_CHANNEL_ID, MINECRAFT_TO_DISCORD, DEATH_MARKER, ADVANCEMENT_MARKER, LOG_CHANNEL_ID
+    SCOREBOARD_CHANNEL_ID, DEATH_MARKER, ADVANCEMENT_MARKER, LOG_CHANNEL_ID,
+    WHITELIST_ROLE_ID, WEEKLY_RANKINGS_CHANNEL_ID
 )
 from database.queries import (
     initialize_database, record_death, record_advancement, record_login,
-    record_logout, get_player_stats, clear_online_players
+    record_logout, get_player_stats, clear_online_players, save_daily_stats, 
+    get_stats_for_period, get_all_deaths, get_all_advancements, get_all_playtimes
 )
-from utils.discord_helpers import get_discord_user, get_player_display_names, get_minecraft_from_discord
+from utils.discord_helpers import (
+    get_discord_user, get_player_display_names, get_minecraft_from_discord,
+    get_discord_from_minecraft
+)
+from utils.formatters import format_playtime
 from commands.player_stats import (
     deaths_command, advancements_command, playtime_command,
     deathlist_command, advancementlist_command, playtimelist_command
 )
-from commands.admin import updateroles_command, addhistory_command
+from commands.admin import updateroles_command, addhistory_command, whitelist_command
 from tasks.leaderboard import leaderboard_update_task
 from tasks.roles import (
-    add_online_role, remove_online_role, clear_all_online_roles, role_update_task
+    add_online_role, remove_online_role, clear_all_online_roles, role_update_task,
+    update_achievement_roles
 )
 
-from utils.logging import log
+from utils.logging import setup_logging
 
 # Initialize bot with required intents
 intents = discord.Intents.default()
@@ -37,17 +45,211 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Global variables
 server_online = False
 online_players = []
+logger = None
+discord_handler = None
+
+# Daily stats summary task
+@tasks.loop(hours=24)
+async def daily_stats_summary():
+    """Post daily stats summary."""
+    global logger
+    
+    try:
+        # Save today's stats first
+        save_daily_stats()
+        
+        stats_channel_id = WEEKLY_RANKINGS_CHANNEL_ID
+        
+        channel = bot.get_channel(stats_channel_id)
+        if not channel:
+            logger.warning(f"Could not find stats channel with ID {stats_channel_id}")
+            return
+        
+        # Get stats for past day
+        daily_stats = get_stats_for_period(1)
+        
+        if not daily_stats or len(daily_stats) == 0:
+            logger.info("No daily stats to report")
+            await channel.send("No player activity to report for today.")
+            return
+        
+        # Filter out players with no activity
+        active_players = [stats for stats in daily_stats if stats[1] > 0 or stats[2] > 0 or stats[3] > 0]
+        
+        if not active_players:
+            logger.info("No active players today")
+            await channel.send("No player activity to report for today.")
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title="📊 Daily Stats Summary",
+            description=f"Player activity for {datetime.datetime.now().strftime('%Y-%m-%d')}",
+            color=discord.Color.blue(),
+            timestamp=datetime.datetime.now()
+        )
+        
+        # Most deaths
+        most_deaths = sorted(active_players, key=lambda x: x[1], reverse=True)
+        if most_deaths and most_deaths[0][1] > 0:
+            deaths_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[1]} deaths" 
+                                  for idx, stats in enumerate(most_deaths[:3]) if stats[1] > 0])
+            embed.add_field(name="💀 Most Deaths", value=deaths_str or "No deaths today", inline=False)
+        
+        # Most advancements
+        most_advancements = sorted(active_players, key=lambda x: x[2], reverse=True)
+        if most_advancements and most_advancements[0][2] > 0:
+            adv_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[2]} advancements" 
+                               for idx, stats in enumerate(most_advancements[:3]) if stats[2] > 0])
+            embed.add_field(name="⭐ Most Advancements", value=adv_str or "No advancements today", inline=False)
+        
+        # Most playtime
+        most_playtime = sorted(active_players, key=lambda x: x[3], reverse=True)
+        if most_playtime and most_playtime[0][3] > 0:
+            playtime_str = "\n".join([f"{idx+1}. {stats[0]}: {format_playtime(stats[3])}" 
+                                    for idx, stats in enumerate(most_playtime[:3]) if stats[3] > 0])
+            embed.add_field(name="🕒 Most Playtime", value=playtime_str or "No playtime recorded today", inline=False)
+        
+        # Most active player overall (weighted score: playtime + advancements*60 + deaths*30)
+        def activity_score(stats):
+            return stats[3] + (stats[2] * 60) + (stats[1] * 30)
+        
+        most_active = sorted(active_players, key=activity_score, reverse=True)
+        if most_active:
+            mvp = most_active[0][0]
+            embed.add_field(name="🏆 Most Active Player", value=f"**{mvp}**", inline=False)
+        
+        await channel.send(embed=embed)
+        logger.info("Posted daily stats summary")
+        
+    except Exception as e:
+        logger.error(f"Error in daily stats summary: {e}")
+
+@daily_stats_summary.before_loop
+async def before_daily_stats():
+    """Wait until the bot is ready."""
+    await bot.wait_until_ready()
+    
+    # Calculate time until next run (set to run at 00:05 each day)
+    now = datetime.datetime.now()
+    future = now.replace(hour=0, minute=5, second=0)
+    if now.hour >= 0 and now.minute > 5:  # If already past midnight
+        future += datetime.timedelta(days=1)
+    
+    await asyncio.sleep((future - now).seconds)
+
+# Weekly stats task
+@tasks.loop(hours=168)  # 7 days * 24 hours
+async def weekly_stats_summary():
+    """Post weekly stats summary."""
+    global logger
+    
+    try:
+        stats_channel_id = WEEKLY_RANKINGS_CHANNEL_ID
+        
+        channel = bot.get_channel(stats_channel_id)
+        if not channel:
+            logger.warning(f"Could not find stats channel with ID {stats_channel_id}")
+            return
+        
+        # Get stats for past week
+        weekly_stats = get_stats_for_period(7)
+        
+        if not weekly_stats or len(weekly_stats) == 0:
+            logger.info("No weekly stats to report")
+            await channel.send("No player activity to report for this week.")
+            return
+        
+        # Filter out players with no activity
+        active_players = [stats for stats in weekly_stats if stats[1] > 0 or stats[2] > 0 or stats[3] > 0]
+        
+        if not active_players:
+            logger.info("No active players this week")
+            await channel.send("No player activity to report for this week.")
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title="📊 Weekly Stats Summary",
+            description=f"Player activity for the week ending {datetime.datetime.now().strftime('%Y-%m-%d')}",
+            color=discord.Color.gold(),
+            timestamp=datetime.datetime.now()
+        )
+        
+        # Most deaths
+        most_deaths = sorted(active_players, key=lambda x: x[1], reverse=True)
+        if most_deaths and most_deaths[0][1] > 0:
+            deaths_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[1]} deaths" 
+                                  for idx, stats in enumerate(most_deaths[:5]) if stats[1] > 0])
+            embed.add_field(name="💀 Most Deaths", value=deaths_str or "No deaths this week", inline=False)
+        
+        # Most advancements
+        most_advancements = sorted(active_players, key=lambda x: x[2], reverse=True)
+        if most_advancements and most_advancements[0][2] > 0:
+            adv_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[2]} advancements" 
+                               for idx, stats in enumerate(most_advancements[:5]) if stats[2] > 0])
+            embed.add_field(name="⭐ Most Advancements", value=adv_str or "No advancements this week", inline=False)
+        
+        # Most playtime
+        most_playtime = sorted(active_players, key=lambda x: x[3], reverse=True)
+        if most_playtime and most_playtime[0][3] > 0:
+            playtime_str = "\n".join([f"{idx+1}. {stats[0]}: {format_playtime(stats[3])}" 
+                                    for idx, stats in enumerate(most_playtime[:5]) if stats[3] > 0])
+            embed.add_field(name="🕒 Most Playtime", value=playtime_str or "No playtime recorded this week", inline=False)
+        
+        # Most active player overall (weighted score)
+        def activity_score(stats):
+            return stats[3] + (stats[2] * 60) + (stats[1] * 30)
+        
+        most_active = sorted(active_players, key=activity_score, reverse=True)
+        if most_active:
+            mvp_stats = most_active[0]
+            mvp = mvp_stats[0]
+            embed.add_field(name="🏆 Player of the Week", 
+                          value=f"**{mvp}**\n"
+                                f"• {mvp_stats[1]} deaths\n"
+                                f"• {mvp_stats[2]} advancements\n"
+                                f"• {format_playtime(mvp_stats[3])} played", 
+                          inline=False)
+        
+        await channel.send(embed=embed)
+        logger.info("Posted weekly stats summary")
+        
+    except Exception as e:
+        logger.error(f"Error in weekly stats summary: {e}")
+
+@weekly_stats_summary.before_loop
+async def before_weekly_stats():
+    """Wait until the bot is ready."""
+    await bot.wait_until_ready()
+    
+    # Calculate time until next run (set to run at 00:15 on Sundays)
+    now = datetime.datetime.now()
+    days_until_sunday = (6 - now.weekday()) % 7  # Sunday is 6
+    future = now.replace(hour=0, minute=15, second=0) + datetime.timedelta(days=days_until_sunday)
+    if now.weekday() == 6 and now.hour >= 0 and now.minute > 15:  # If already past Sunday midnight
+        future += datetime.timedelta(days=7)
+    
+    await asyncio.sleep((future - now).seconds)
 
 # Dead bots for henry and bear
 def run_idle_bots():
     subprocess.Popen(["python", "run_bear.py"])
     subprocess.Popen(["python", "run_henry.py"])
+    # Add trading bot
+    subprocess.Popen(["python", "trading_bot.py"])
 
 # Bot event handlers
 @bot.event
 async def on_ready():
     """When bot is ready, initialize everything."""
-    log(f'Bot is ready! Logged in as {bot.user}')
+    global logger, discord_handler
+    
+    # Set up logging
+    logger, discord_handler = setup_logging(bot, LOG_CHANNEL_ID)
+    discord_handler.set_ready(True)
+    
+    logger.info(f'Bot is ready! Logged in as {bot.user}')
     run_idle_bots()
     
     # Initialize database
@@ -59,44 +261,15 @@ async def on_ready():
     # Start background tasks
     bot.loop.create_task(leaderboard_update_task(bot))
     bot.loop.create_task(role_update_task(bot))
-    bot.loop.create_task(send_logs_to_discord())
+    daily_stats_summary.start()  # Start the daily stats task
+    weekly_stats_summary.start() # Start the weekly stats task
     
-    log("Bot initialization complete!")
-
-async def send_logs_to_discord():
-    """Send recent logs to Discord channel"""
-    await bot.wait_until_ready()
-    
-    from const import LOG_CHANNEL_ID
-    import os
-    
-    while not bot.is_closed():
-        try:
-            channel = bot.get_channel(LOG_CHANNEL_ID)
-            if channel:
-                log_file = os.path.join("logs", f"{datetime.date.today().strftime('%Y-%m-%d')}.log")
-                
-                if os.path.exists(log_file):
-                    with open(log_file, "r", encoding="utf-8") as f:
-                        # Read last 20 lines
-                        lines = f.readlines()[-20:]
-                        
-                    if lines:
-                        # Join lines and split into chunks if needed
-                        content = "".join(lines)
-                        if len(content) > 1900:
-                            content = "...\n" + "".join(lines[-15:])  # Truncate if too long
-                            
-                        await channel.send(f"**Recent Logs:**\n```\n{content}\n```")
-        except Exception as e:
-            print(f"Error sending logs to Discord: {e}")
-            
-        await asyncio.sleep(60)  # Check every 5 seconds
+    logger.info("Bot initialization complete!")
 
 @bot.event
 async def on_message(message):
     """Handle incoming messages."""
-    global server_online, online_players
+    global server_online, online_players, logger
     
     # Ignore own messages
     if message.author == bot.user:
@@ -104,7 +277,7 @@ async def on_message(message):
     
     # Debug logging for webhook messages
     if message.channel.id == WEBHOOK_CHANNEL_ID:
-        log(f"Webhook message received: {message.content}")
+        logger.debug(f"Webhook message received: {message.content}")
     
     # Check if it's in the webhook channel
     if message.channel.id == WEBHOOK_CHANNEL_ID:
@@ -113,7 +286,7 @@ async def on_message(message):
             server_online = True
             # await message.add_reaction('✅')
             await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Server is online! (0 players)"))
-            log("Server has started!")
+            logger.info("Server has started!")
             
         elif ":octagonal_sign: **Server has stopped**" in message.content:
             server_online = False
@@ -128,11 +301,11 @@ async def on_message(message):
                 await clear_all_online_roles(guild)
             
             await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Server is currently offline."))
-            log("Server has stopped!")
+            logger.info("Server has stopped!")
             
         # Player join - check for both bold and plain text formats
         elif " joined the server" in message.content:
-            log(f"Join message detected: {message.content}")
+            logger.debug(f"Join message detected: {message.content}")
 
             match = re.search(r"\*\*(.*?)\*\* joined the server", message.content)
             if not match:
@@ -143,11 +316,12 @@ async def on_message(message):
                 minecraft_username = re.sub(r"\\(.)", r"\1", match.group(1))
                 await message.add_reaction('✅')
 
-                log(f"Extracted username: {minecraft_username}")
-
+                logger.debug(f"Extracted username: {minecraft_username}")
                 
-                if minecraft_username in MINECRAFT_TO_DISCORD:
-                    discord_username = MINECRAFT_TO_DISCORD[minecraft_username]
+                # Check if player exists in database instead of MINECRAFT_TO_DISCORD
+                player_stats = get_player_stats(minecraft_username=minecraft_username)
+                if player_stats:
+                    discord_username = player_stats[1]  # discord_username is second column
                     
                     # Record login
                     record_login(minecraft_username)
@@ -166,16 +340,16 @@ async def on_message(message):
                         status_text = f"Online: {len(discord_display_names)} players"
 
                     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=status_text))
-                    log(f"{minecraft_username} joined the server")
+                    logger.info(f"{minecraft_username} joined the server")
                 else:
                     await message.add_reaction('❓')
-                    log(f"Unknown player joined: {minecraft_username}")
+                    logger.warning(f"Unknown player joined: {minecraft_username}")
             else:
-                log("Could not extract username from join message")
+                logger.error("Could not extract username from join message")
         
         # Player leave - check for both bold and plain text formats
         elif " left the server" in message.content:
-            log(f"Leave message detected: {message.content}")
+            logger.debug(f"Leave message detected: {message.content}")
             
             # Try bold format first (from markdown)
             match = re.search(r"\*\*(.*?)\*\* left the server", message.content)
@@ -187,10 +361,12 @@ async def on_message(message):
                 minecraft_username = match.group(1).replace("\\", "")  # Remove escape chars
                 await message.add_reaction('👋')
                 
-                log(f"Extracted username: {minecraft_username}")
+                logger.debug(f"Extracted username: {minecraft_username}")
                 
-                if minecraft_username in MINECRAFT_TO_DISCORD:
-                    discord_username = MINECRAFT_TO_DISCORD[minecraft_username]
+                # Check if player exists in database
+                player_stats = get_player_stats(minecraft_username=minecraft_username)
+                if player_stats:
+                    discord_username = player_stats[1]  # discord_username is second column
                     
                     # Record logout
                     record_logout(minecraft_username)
@@ -210,16 +386,15 @@ async def on_message(message):
                         if len(status_text) > 100:
                             status_text = f"Online: {len(discord_display_names)} players"
                         await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=status_text))
-                        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=status_text))
                     else:
                         await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Server is online. Join now!"))
                     
-                    log(f"{minecraft_username} left the server")
+                    logger.info(f"{minecraft_username} left the server")
                 else:
                     await message.add_reaction('❓')
-                    log(f"Unknown player left: {minecraft_username}")
+                    logger.warning(f"Unknown player left: {minecraft_username}")
             else:
-                log("Could not extract username from leave message")
+                logger.error("Could not extract username from leave message")
         
         # Death messages - also check for both formats
         elif message.content.startswith(DEATH_MARKER) or DEATH_MARKER in message.content:
@@ -230,7 +405,9 @@ async def on_message(message):
                 minecraft_username = re.sub(r"\\(.)", r"\1", match.group(1))
                 await message.add_reaction('🇱')  # Regional indicator L emoji
                 
-                if minecraft_username in MINECRAFT_TO_DISCORD:
+                # Check if player exists in database
+                player_stats = get_player_stats(minecraft_username=minecraft_username)
+                if player_stats:
                     record_death(minecraft_username)
                 
                 # Send a random death message
@@ -284,10 +461,10 @@ async def on_message(message):
                     ]
                 await message.channel.send(random.choice(death_messages))
             
-                log(f"{minecraft_username} died")
+                logger.info(f"{minecraft_username} died")
             else:
                 await message.add_reaction('❓')
-                log(f"Unknown player died: {minecraft_username}")
+                logger.warning(f"Unknown player died: {message.content}")
         
         # Inside your advancement message handler
         elif message.content.startswith(ADVANCEMENT_MARKER) or ADVANCEMENT_MARKER in message.content:
@@ -298,12 +475,14 @@ async def on_message(message):
                 
                 await message.add_reaction(ADVANCEMENT_MARKER)
                 
-                if minecraft_username in MINECRAFT_TO_DISCORD:
+                # Check if player exists in database
+                player_stats = get_player_stats(minecraft_username=minecraft_username)
+                if player_stats:
                     record_advancement(minecraft_username)
-                    log(f"{minecraft_username} got an advancement")
+                    logger.info(f"{minecraft_username} got an advancement")
                 else:
                     await message.add_reaction('❓')
-                    log(f"Unknown player got advancement: {minecraft_username}")
+                    logger.warning(f"Unknown player got advancement: {minecraft_username}")
     
     # Handle playerlist command when server is offline
     if not server_online and message.content.strip() == "playerlist":
@@ -313,7 +492,46 @@ async def on_message(message):
     # Process commands
     await bot.process_commands(message)
 
-# Set up commands
+# Stats summary command
+@bot.command(name="statssummary")
+async def statssummary_cmd(ctx, period="daily", channel_id=None):
+    """Post a stats summary or set the stats channel."""
+    # Check if user has mod role
+    if not any(role.id == MOD_ROLE_ID for role in ctx.author.roles):
+        await ctx.send("You don't have permission to use this command.")
+        return
+    
+    await ctx.message.add_reaction('✅')
+    
+    if channel_id:
+        try:
+            channel_id = int(channel_id)
+            channel = bot.get_channel(channel_id)
+            if not channel:
+                await ctx.send(f"Could not find channel with ID {channel_id}")
+                return
+            
+            # Store channel ID for future use
+            bot.stats_channel_id = channel_id
+            await ctx.send(f"Stats channel set to {channel.mention}")
+            return
+        except ValueError:
+            await ctx.send("Invalid channel ID. Please provide a numeric ID.")
+            return
+    
+    # Trigger appropriate summary based on requested period
+    if period.lower() == "daily":
+        # Run the daily summary task outside its schedule
+        await daily_stats_summary()
+        await ctx.send("Daily stats summary posted!")
+    elif period.lower() == "weekly":
+        # Run the weekly summary task outside its schedule
+        await weekly_stats_summary()
+        await ctx.send("Weekly stats summary posted!")
+    else:
+        await ctx.send("Invalid period. Use 'daily' or 'weekly'.")
+
+# Command registrations
 @bot.command(name="deaths")
 async def deaths_cmd(ctx, username=None):
     await deaths_command(ctx, bot, username)
@@ -343,8 +561,12 @@ async def updateroles_cmd(ctx):
     await updateroles_command(ctx, bot)
 
 @bot.command(name="addhistory")
-async def addhistory_cmd(ctx):
-    await addhistory_command(ctx, bot)
+async def addhistory_cmd(ctx, username=None, action=None):
+    await addhistory_command(ctx, bot, username, action)
+
+@bot.command(name="whitelist")
+async def whitelist_cmd(ctx, discord_user=None, minecraft_user=None):
+    await whitelist_command(ctx, bot, discord_user, minecraft_user)
 
 # Run the bot
 if __name__ == "__main__":

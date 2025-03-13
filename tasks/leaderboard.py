@@ -1,10 +1,14 @@
 import discord
 import asyncio
 import datetime
+import logging
 from database.queries import get_all_playtimes, get_all_advancements, get_all_deaths
 from utils.formatters import format_playtime
 from const import SCOREBOARD_CHANNEL_ID
-from utils.logging import log
+from utils.logging import setup_logging
+
+# Setup logger
+logger = logging.getLogger('nameless_bot')
 
 # Global variable
 leaderboard_messages = {'deaths': None, 'advancements': None, 'playtime': None}
@@ -95,9 +99,9 @@ async def update_leaderboards(bot, channel):
         if leaderboard_messages['deaths']:
             await leaderboard_messages['deaths'].edit(embed=deaths_embed)
         
-        log("Updated leaderboards successfully")
+        logger.info("Updated leaderboards successfully")
     except Exception as e:
-        log(f"Error updating leaderboards: {e}")
+        logger.error(f"Error updating leaderboards: {e}")
         # If editing failed, try to send new messages
         try:
             if leaderboard_messages['playtime']:
@@ -107,7 +111,7 @@ async def update_leaderboards(bot, channel):
             if leaderboard_messages['deaths']:
                 leaderboard_messages['deaths'] = await channel.send(embed=deaths_embed)
         except Exception as e2:
-            log(f"Failed to recover from leaderboard update error: {e2}")
+            logger.error(f"Failed to recover from leaderboard update error: {e2}")
 
 async def leaderboard_update_task(bot):
     """Update leaderboards every minute."""
@@ -115,13 +119,13 @@ async def leaderboard_update_task(bot):
     channel = bot.get_channel(SCOREBOARD_CHANNEL_ID)
     
     if not channel:
-        log(f"Could not find channel with ID {SCOREBOARD_CHANNEL_ID}")
+        logger.error(f"Could not find channel with ID {SCOREBOARD_CHANNEL_ID}")
         return
     
     while not bot.is_closed():
         try:
             await update_leaderboards(bot, channel)
         except Exception as e:
-            log(f"Error in leaderboard update task: {e}")
+            logger.error(f"Error in leaderboard update task: {e}")
         
         await asyncio.sleep(60)  # Update every minute

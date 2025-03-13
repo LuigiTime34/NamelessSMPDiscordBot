@@ -7,7 +7,11 @@ from const import (
 )
 from database.queries import get_all_deaths, get_all_advancements, get_all_playtimes, get_player_stats
 from utils.discord_helpers import get_discord_user
-from utils.logging import log
+import logging
+from utils.logging import setup_logging
+
+# Setup logger
+logger = logging.getLogger('nameless_bot')
 
 async def add_online_role(member):
     """Add the online role to a Discord member."""
@@ -15,7 +19,7 @@ async def add_online_role(member):
         role = discord.utils.get(member.guild.roles, name=ONLINE_ROLE_NAME)
         if role and role not in member.roles:
             await member.add_roles(role)
-            log(f"Added {ONLINE_ROLE_NAME} role to {member.name}")
+            logger.info(f"Added {ONLINE_ROLE_NAME} role to {member.name}")
 
 async def remove_online_role(member):
     """Remove the online role from a Discord member."""
@@ -23,7 +27,7 @@ async def remove_online_role(member):
         role = discord.utils.get(member.guild.roles, name=ONLINE_ROLE_NAME)
         if role and role in member.roles:
             await member.remove_roles(role)
-            log(f"Removed {ONLINE_ROLE_NAME} role from {member.name}")
+            logger.info(f"Removed {ONLINE_ROLE_NAME} role from {member.name}")
 
 async def clear_all_online_roles(guild):
     """Remove online role from all members in the guild."""
@@ -32,11 +36,11 @@ async def clear_all_online_roles(guild):
         members_with_role = [member for member in guild.members if role in member.roles]
         for member in members_with_role:
             await member.remove_roles(role)
-        log(f"Cleared {ONLINE_ROLE_NAME} role from {len(members_with_role)} members")
+        logger.info(f"Cleared {ONLINE_ROLE_NAME} role from {len(members_with_role)} members")
 
 async def update_achievement_roles(bot, guild):
     """Update all achievement roles based on current stats."""
-    log("Updating achievement roles...")
+    logger.info("Updating achievement roles...")
     
     # Get data
     deaths_data = get_all_deaths()
@@ -149,13 +153,13 @@ async def update_achievement_roles(bot, guild):
             members_to_remove = current_role_holders[role] - new_members
             for member in members_to_remove:
                 await member.remove_roles(role)
-                log(f"Removed {role.name} from {member.name}")
+                logger.info(f"Removed {role.name} from {member.name}")
             
             # Add role to members who should now have it
             members_to_add = new_members - current_role_holders[role]
             for member in members_to_add:
                 await member.add_roles(role)
-                log(f"Added {role.name} to {member.name}")
+                logger.info(f"Added {role.name} to {member.name}")
 
 async def role_update_task(bot):
     """Update achievement roles every minute."""
@@ -166,6 +170,6 @@ async def role_update_task(bot):
             for guild in bot.guilds:
                 await update_achievement_roles(bot, guild)
         except Exception as e:
-            log(f"Error in role update task: {e}")
+            logger.warning(f"Error in role update task: {e}")
         
         await asyncio.sleep(60)  # Update every minute

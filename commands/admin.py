@@ -1,7 +1,8 @@
 import discord
 import asyncio
 from const import MOD_ROLE_ID, MINECRAFT_TO_DISCORD
-from database.queries import get_all_players, bulk_update_history
+from database.queries import get_all_players, bulk_update_history, delete_player, add_player, get_player_stats
+from utils.discord_helpers import get_discord_user
 from tasks.roles import update_achievement_roles
 
 async def updateroles_command(ctx, bot):
@@ -16,7 +17,7 @@ async def updateroles_command(ctx, bot):
     await update_achievement_roles(bot, ctx.guild)
     await ctx.send("Roles have been updated!")
 
-async def addhistory_command(ctx, bot):
+async def addhistory_command(ctx, bot, username=None, action=None):
     """Add or update player history."""
     # Check if user has mod role
     if not any(role.id == MOD_ROLE_ID for role in ctx.author.roles):
@@ -24,6 +25,19 @@ async def addhistory_command(ctx, bot):
         return
     
     await ctx.message.add_reaction('✅')
+    
+    # Check if we're deleting a player
+    if username and action and action.lower() == "delete":
+        player_stats = get_player_stats(minecraft_username=username)
+        if player_stats:
+            success = delete_player(username)
+            if success:
+                await ctx.send(f"Successfully deleted player {username} from the database.")
+            else:
+                await ctx.send(f"Error deleting player {username}.")
+        else:
+            await ctx.send(f"Player {username} not found in the database.")
+        return
     
     # Get current stats
     players = get_all_players()
@@ -86,7 +100,9 @@ username2: deaths=2, advancements=15, playtime=7200
             username, data_str = line.split(':', 1)
             username = username.strip()
             
-            if username not in MINECRAFT_TO_DISCORD:
+            # Check if username exists in database
+            player_stats = get_player_stats(minecraft_username=username)
+            if not player_stats:
                 await ctx.send(f"Unknown username: {username}")
                 continue
                 
@@ -118,3 +134,43 @@ username2: deaths=2, advancements=15, playtime=7200
             
     except asyncio.TimeoutError:
         await ctx.send("Timed out waiting for response.")
+
+async def whitelist_command(ctx, bot, discord_user=None, minecraft_user=None):
+    """Whitelist a player by adding them to the database and giving them the whitelist role."""
+    # Check if user has mod role
+    if not any(role.id == MOD_ROLE_ID for role in ctx.author.roles):
+        await ctx.send("You don't have permission to use this command.")
+        return
+    
+    # Check for required parameters
+    if not discord_user or not minecraft_user:
+        await ctx.send("Both Discord user and Minecraft username are required. Format: !whitelist DISCORD_USER MINECRAFT_USER")
+        return
+    
+    await ctx.message.add_reaction('✅')
+    
+    # Find the Discord user
+    member = get_discord_user(bot, discord_user)
+    
+    if not member:
+        await ctx.send(f"Could not find Discord user {discord_user}")
+        return
+    
+    # Add player to database
+    success = add_player(minecraft_user, discord_user)
+    
+    if not success:
+        await ctx.send(f"Error adding player {minecraft_user} to database.")
+        return
+    
+    # Add whitelist role
+    try:
+        from const import WHITELIST_ROLE_ID
+        whitelist_role = ctx.guild.get_role(WHITELIST_ROLE_ID)
+        if whitelist_role:
+            await member.add_roles(whitelist_role)
+            await ctx.send(f"Added {member.mention} to the whitelist with Minecraft username {minecraft_user}!")
+        else:
+            await ctx.send(f"Could not find whitelist role. User has been added to the database, but the role was not assigned.")
+    except Exception as e:
+        await ctx.send(f"Error assigning role: {str(e)}. The user has been added to the database but the role was not assigned.")
