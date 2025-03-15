@@ -407,53 +407,37 @@ def save_daily_stats():
         # Get current date in YYYY-MM-DD format
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         
-        # Get yesterday's stats for comparison
-        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-        
         # Get all player current stats
         players = get_all_players()
         
-        # For each player, calculate daily differences and save
+        # For each player, save today's stats
         for mc_username, disc_username, deaths, advancements, playtime in players:
-            # Get yesterday's stats if they exist
+            # Check if we already have an entry for today
             cursor.execute(
-                "SELECT deaths, advancements, playtime_seconds FROM stats_history WHERE minecraft_username = ? AND date = ?", 
-                (mc_username, yesterday)
+                "SELECT * FROM stats_history WHERE minecraft_username = ? AND date = ?", 
+                (mc_username, today)
             )
-            yesterday_stats = cursor.fetchone()
+            today_stats = cursor.fetchone()
             
-            if yesterday_stats:
-                # Calculate differences
-                deaths_today = max(0, deaths - yesterday_stats[0])
-                advancements_today = max(0, advancements - yesterday_stats[1])
-                playtime_today = max(0, playtime - yesterday_stats[2])
-            else:
-                # If no yesterday stats, we can't calculate accurately, just use zeros
-                deaths_today = 0
-                advancements_today = 0
-                playtime_today = 0
-                
-                # For players who were online today, use their current session
-                cursor.execute(
-                    "SELECT login_time FROM online_players WHERE minecraft_username = ?",
-                    (mc_username,)
-                )
-                online = cursor.fetchone()
-                if online:
-                    login_time = online[0]
-                    current_time = int(datetime.datetime.now().timestamp())
-                    playtime_today = current_time - login_time
+            if not today_stats:
+                # No entry exists for today, create a new one
+                cursor.execute('''
+                INSERT INTO stats_history 
+                (minecraft_username, date, deaths, advancements, playtime_seconds)
+                VALUES (?, ?, 0, 0, 0)
+                ''', (mc_username, today))
             
-            # Insert or update today's record
+            # Update today's entry with current totals
+            # This ensures we capture player stats even if they're not active
             cursor.execute('''
-            INSERT OR REPLACE INTO stats_history 
-            (minecraft_username, date, deaths, advancements, playtime_seconds)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (mc_username, today, deaths_today, advancements_today, playtime_today))
+            UPDATE stats_history 
+            SET deaths = ?, advancements = ?, playtime_seconds = ?
+            WHERE minecraft_username = ? AND date = ?
+            ''', (deaths, advancements, playtime, mc_username, today))
         
         conn.commit()
         conn.close()
-        logger.info(f"Saved daily stats for {len(players)} players")
+        logger.info(f"Saved daily stats snapshot for {len(players)} players")
         return True
     except Exception as e:
         logger.error(f"Error saving daily stats: {e}")

@@ -16,7 +16,7 @@ from const import (
 from database.queries import (
     initialize_database, record_death, record_advancement, record_login,
     record_logout, get_player_stats, clear_online_players, save_daily_stats, 
-    get_stats_for_period, get_all_deaths, get_all_advancements, get_all_playtimes
+    get_stats_for_period, get_all_deaths, get_all_advancements, get_all_playtimes, get_connection
 )
 from utils.discord_helpers import (
     get_discord_user, get_player_display_names, get_minecraft_from_discord,
@@ -51,11 +51,11 @@ discord_handler = None
 # Daily stats summary task
 @tasks.loop(hours=24)
 async def daily_stats_summary():
-    """Post daily stats summary."""
+    """Post daily stats summary and save current stats."""
     global logger
     
     try:
-        # Save today's stats first
+        # First, save today's stats snapshot
         save_daily_stats()
         
         stats_channel_id = WEEKLY_RANKINGS_CHANNEL_ID
@@ -65,26 +65,40 @@ async def daily_stats_summary():
             logger.warning(f"Could not find stats channel with ID {stats_channel_id}")
             return
         
-        # Get stats for past day
-        daily_stats = get_stats_for_period(1)
+        # Get yesterday's date
+        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # Connect to DB
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Get stats specifically for yesterday
+        cursor.execute('''
+        SELECT minecraft_username, deaths, advancements, playtime_seconds
+        FROM stats_history
+        WHERE date = ?
+        ''', (yesterday,))
+        
+        daily_stats = cursor.fetchall()
+        conn.close()
         
         if not daily_stats or len(daily_stats) == 0:
             logger.info("No daily stats to report")
-            await channel.send("No player activity to report for today.")
+            await channel.send("No player activity to report for yesterday.")
             return
         
         # Filter out players with no activity
         active_players = [stats for stats in daily_stats if stats[1] > 0 or stats[2] > 0 or stats[3] > 0]
         
         if not active_players:
-            logger.info("No active players today")
-            await channel.send("No player activity to report for today.")
+            logger.info("No active players yesterday")
+            await channel.send("No player activity to report for yesterday.")
             return
         
         # Create embed
         embed = discord.Embed(
             title="📊 Daily Stats Summary",
-            description=f"Player activity for {datetime.datetime.now().strftime('%Y-%m-%d')}",
+            description=f"Player activity for {yesterday}",
             color=discord.Color.blue(),
             timestamp=datetime.datetime.now()
         )
@@ -94,21 +108,21 @@ async def daily_stats_summary():
         if most_deaths and most_deaths[0][1] > 0:
             deaths_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[1]} deaths" 
                                   for idx, stats in enumerate(most_deaths[:3]) if stats[1] > 0])
-            embed.add_field(name="💀 Most Deaths", value=deaths_str or "No deaths today", inline=False)
+            embed.add_field(name="💀 Most Deaths", value=deaths_str or "No deaths yesterday", inline=False)
         
         # Most advancements
         most_advancements = sorted(active_players, key=lambda x: x[2], reverse=True)
         if most_advancements and most_advancements[0][2] > 0:
             adv_str = "\n".join([f"{idx+1}. {stats[0]}: {stats[2]} advancements" 
                                for idx, stats in enumerate(most_advancements[:3]) if stats[2] > 0])
-            embed.add_field(name="⭐ Most Advancements", value=adv_str or "No advancements today", inline=False)
+            embed.add_field(name="⭐ Most Advancements", value=adv_str or "No advancements yesterday", inline=False)
         
         # Most playtime
         most_playtime = sorted(active_players, key=lambda x: x[3], reverse=True)
         if most_playtime and most_playtime[0][3] > 0:
             playtime_str = "\n".join([f"{idx+1}. {stats[0]}: {format_playtime(stats[3])}" 
                                     for idx, stats in enumerate(most_playtime[:3]) if stats[3] > 0])
-            embed.add_field(name="🕒 Most Playtime", value=playtime_str or "No playtime recorded today", inline=False)
+            embed.add_field(name="🕒 Most Playtime", value=playtime_str or "No playtime recorded yesterday", inline=False)
         
         # Most active player overall (weighted score: playtime + advancements*60 + deaths*30)
         def activity_score(stats):
@@ -141,7 +155,7 @@ async def before_daily_stats():
 # Weekly stats task
 @tasks.loop(hours=168)  # 7 days * 24 hours
 async def weekly_stats_summary():
-    """Post weekly stats summary."""
+    """Post weekly stats summary using saved stats."""
     global logger
     
     try:
@@ -152,8 +166,27 @@ async def weekly_stats_summary():
             logger.warning(f"Could not find stats channel with ID {stats_channel_id}")
             return
         
-        # Get stats for past week
-        weekly_stats = get_stats_for_period(7)
+        # Date range for past week
+        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        # Connect to DB
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Aggregate stats for the past week
+        cursor.execute('''
+        SELECT minecraft_username, 
+               SUM(deaths) as total_deaths, 
+               SUM(advancements) as total_advancements,
+               SUM(playtime_seconds) as total_playtime
+        FROM stats_history
+        WHERE date BETWEEN ? AND ?
+        GROUP BY minecraft_username
+        ''', (start_date, end_date))
+        
+        weekly_stats = cursor.fetchall()
+        conn.close()
         
         if not weekly_stats or len(weekly_stats) == 0:
             logger.info("No weekly stats to report")
@@ -171,7 +204,7 @@ async def weekly_stats_summary():
         # Create embed
         embed = discord.Embed(
             title="📊 Weekly Stats Summary",
-            description=f"Player activity for the week ending {datetime.datetime.now().strftime('%Y-%m-%d')}",
+            description=f"Player activity for the week {start_date} to {end_date}",
             color=discord.Color.gold(),
             timestamp=datetime.datetime.now()
         )
@@ -399,72 +432,135 @@ async def on_message(message):
         # Death messages - also check for both formats
         elif message.content.startswith(DEATH_MARKER) or DEATH_MARKER in message.content:
             # Adjust this pattern based on your actual death message format
-            match = re.search(f"{DEATH_MARKER} (.*?) (died|was|got|fell)", message.content)
+            match = re.search(f"{DEATH_MARKER} (.*?)(?:\s+\[.*?\])? (died|was|got|fell)", message.content)
             
             if match:
                 minecraft_username = re.sub(r"\\(.)", r"\1", match.group(1))
                 await message.add_reaction('🇱')  # Regional indicator L emoji
                 
+                # Debug output to see what username we're actually extracting
+                logger.debug(f"Death detected for username: '{minecraft_username}'")
+                
                 # Check if player exists in database
                 player_stats = get_player_stats(minecraft_username=minecraft_username)
                 if player_stats:
                     record_death(minecraft_username)
+                    logger.info(f"{minecraft_username} died")
+                else:
+                    await message.add_reaction('❓')
+                    logger.warning(f"Unknown player died: {message.content}")
                 
                 # Send a random death message
                 death_messages = [
-                        f"**{minecraft_username}** And the award for 'Most Creative Way to Lose All Your Items' goes to...",
-                        f"**{minecraft_username}** Your gravestone should just read 'Oops' at this point.",
-                        f"**{minecraft_username}** I'm sure your items are happier wherever they are now.",
-                        f"**{minecraft_username}** Maybe try surviving next time?",
-                        f"**{minecraft_username}** Another beautiful contribution to the respawn button usage statistics.",
-                        f"**{minecraft_username}** That was definitely the game's fault. Definitely.",
-                        f"**{minecraft_username}** I guess those diamonds really wanted their freedom.",
-                        f"**{minecraft_username}** Taking the express route back to spawn, I see.",
-                        f"**{minecraft_username}** Your death was... inspirational. For the mobs, anyway.",
-                        f"**{minecraft_username}** How thoughtful of you to donate all your items to the void.",
-                        f"**{minecraft_username}** The respawn screen missed you. Glad you two could reunite.",
-                        f"**{minecraft_username}** Your coordinates have been noted as 'places not to go'.",
-                        f"**{minecraft_username}** That was certainly... a choice.",
-                        f"**{minecraft_username}** Amazing how quickly you turn experience points into disappointment.",
-                        f"**{minecraft_username}** Your items are throwing a farewell party without you.",
-                        f"**{minecraft_username}** I see you've chosen the dramatic exit. Again.",
+                        f"And the award for 'Most Creative Way to Lose All Your Items' goes to **{minecraft_username}**...",
+                        f"Your gravestone should just read 'Oops' at this point, **{minecraft_username}**.",
+                        f"I'm sure your items are happier wherever they are now.",
+                        f"Maybe try surviving next time, **{minecraft_username}**?",
+                        f"Another beautiful contribution to the respawn button usage statistics.",
+                        f"That was definitely the game's fault. Definitely.",
+                        f"I guess those diamonds really wanted their freedom, huh **{minecraft_username}**?",
+                        f"Taking the express route back to spawn, I see.",
+                        f"Your death was... inspirational. For the mobs, anyway.",
+                        f"How thoughtful of you to donate all your items to the void.",
+                        f"The respawn screen missed you. Glad you two could reunite.",
+                        f"Your coordinates have been noted as 'places not to go'.",
+                        f"That was certainly... a choice.",
+                        f"Amazing how quickly you turn experience points into disappointment.",
+                        f"Your items are throwing a farewell party without you, **{minecraft_username}**.",
+                        f"I see you've chosen the dramatic exit. Again.",
                         f"**{minecraft_username}** thought they could fly. They were wrong.",
-                        f"**{minecraft_username}** just made a generous donation to the item despawn fund.",
-                        f"**{minecraft_username}** decided their inventory was too cluttered anyway.",
-                        f"**{minecraft_username}** is testing the respawn mechanics. For science.",
-                        f"**{minecraft_username}** found an exciting new way to return to spawn.",
-                        f"**{minecraft_username}** has completed their speedrun to the death screen.",
-                        f"**{minecraft_username}** is taking an unscheduled break from existing.",
-                        f"**{minecraft_username}** thought their armor was just for decoration.",
-                        f"**{minecraft_username}** has discovered that actions have consequences.",
-                        f"**{minecraft_username}** is conducting gravity research. Results inconclusive.",
-                        f"**{minecraft_username}** just demonstrated what not to do.",
-                        f"**{minecraft_username}** has perfected the art of item scattering.",
-                        f"**{minecraft_username}** made their items available for public collection.",
-                        f"**{minecraft_username}** should consider a career that doesn't involve survival.",
-                        f"**{minecraft_username}** is contributing to the mob kill count statistics.",
-                        f"**{minecraft_username}** just rage-quit life.",
-                        f"**{minecraft_username}** found out the hard way.",
-                        f"**{minecraft_username}** has chosen death as today's activity.",
-                        f"**{minecraft_username}** is taking the scenic route back to spawn.",
-                        f"**{minecraft_username}** apparently thought that was a good idea.",
-                        f"**{minecraft_username}** has successfully failed.",
-                        f"**{minecraft_username}** is experiencing technical difficulties. Please stand by.",
-                        f"**{minecraft_username}** went to extraordinary lengths to lose all their progress.",
-                        f"**{minecraft_username}** clearly needed more practice.",
-                        f"**{minecraft_username}** was overcome by a sudden case of not being alive anymore.",
-                        f"**{minecraft_username}** is demonstrating how not to play Minecraft.",
-                        f"**{minecraft_username}** decided to personally check the respawn system.",
-                        f"**{minecraft_username}** is having an unplanned inventory reset.",
-                        f"**{minecraft_username}** should reconsider their life choices. Or death choices.",
-                        f"**{minecraft_username}** just helped the server clear some item lag."
+                        f"Just made a generous donation to the item despawn fund.",
+                        f"Decided their inventory was too cluttered anyway.",
+                        f"Testing the respawn mechanics. For science, of course.",
+                        f"Found an exciting new way to return to spawn.",
+                        f"Has completed their speedrun to the death screen.",
+                        f"Taking an unscheduled break from existing.",
+                        f"Thought their armor was just for decoration.",
+                        f"Discovered that actions have consequences.",
+                        f"Conducting gravity research. Results inconclusive.",
+                        f"Just demonstrated what not to do.",
+                        f"Perfected the art of item scattering.",
+                        f"Made their items available for public collection.",
+                        f"Should consider a career that doesn't involve survival.",
+                        f"Contributing to the mob kill count statistics. Again.",
+                        f"Just rage-quit life.",
+                        f"Found out the hard way.",
+                        f"Has chosen death as today's activity.",
+                        f"Taking the scenic route back to spawn.",
+                        f"Apparently thought that was a good idea.",
+                        f"Successfully failed. An impressive feat, really.",
+                        f"Experiencing technical difficulties. Please stand by.",
+                        f"Went to extraordinary lengths to lose all their progress.",
+                        f"Clearly needed more practice.",
+                        f"Was overcome by a sudden case of not being alive anymore.",
+                        f"Demonstrating how not to play Minecraft.",
+                        f"Decided to personally check the respawn system.",
+                        f"Having an unplanned inventory reset.",
+                        f"Should reconsider their life choices. Or death choices.",
+                        f"Just helped the server clear some item lag. How generous.",
+                        f"That was so pathetic, even the dirt you fell on is ashamed to be associated with you.",
+                        f"How does it feel knowing the only thing you’re good at is disappointing everyone?",
+                        f"Every time you die, the concept of intelligence takes permanent damage.",
+                        f"That was so embarrassing, even the respawn screen is tired of seeing you.",
+                        f"Death doesn’t even want you. It just has no choice but to clean up your failures.",
+                        f"If stupidity was a speedrun category, you’d be the world record holder.",
+                        f"Nothing in this world is more consistent than your ability to ruin everything.",
+                        f"Your ability to fail is honestly impressive. Too bad it's the only skill you have.",
+                        f"At this point, even your own shadow would rather disassociate from you.",
+                        f"Congratulations, you’ve turned dying into a full-time job.",
+                        f"Keep this up and the game is going to start preloading the death screen for you.",
+                        f"You don’t even deserve a death message. Just quit. Just leave.",
+                        f"Watching you play is like watching a train derail in slow motion, except somehow worse.",
+                        f"If there was an IQ test for playing this game, you wouldn’t even qualify for the tutorial.",
+                        f"Every time you respawn, the world collectively sighs in disappointment.",
+                        f"Nothing has ever been wasted as much as the oxygen you’re using up right now.",
+                        f"The sheer lack of talent is almost fascinating. Almost.",
+                        f"Somehow, the only thing more fragile than your ego is your ability to stay alive.",
+                        f"One day, failure might stop following you around. But today is not that day.",
+                        f"Your life expectancy in this game is lower than my expectations for you, and those were already rock bottom.",
+                        f"You’ve been here for five minutes and I already regret every moment of it.",
+                        f"It’s almost impressive how you manage to be wrong in every possible way.",
+                        f"The only thing you’ve mastered is finding new ways to embarrass yourself.",
+                        f"The world isn’t against you. It’s just watching you lose a fight against yourself.",
+                        f"If survival was a multiple-choice question, you’d still somehow pick the wrong answer.",
+                        f"The only thing more tragic than your gameplay is the fact that you keep coming back.",
+                        f"You couldn’t make it through this game even if you had creative mode.",
+                        f"That was so bad, the game should uninstall itself out of pure secondhand embarrassment.",
+                        f"Maybe try thinking before acting? Or is that asking too much?",
+                        f"Watching paint dry is more exciting than whatever this mess is.",
+                        f"You are the reason respawn exists, but honestly, it shouldn’t bother anymore.",
+                        f"If failure was an art form, you'd be the Mona Lisa of disappointment.",
+                        f"I would say 'get good,' but honestly, that ship sailed a long time ago.",
+                        f"You don’t even need enemies when your worst opponent is yourself.",
+                        f"Even a random number generator would have better survival instincts than you.",
+                        f"The concept of evolution just reversed itself watching that disaster unfold.",
+                        f"There is literally no excuse for how unbelievably bad that was.",
+                        f"If you were a mob, you'd be the one everyone farms for free loot.",
+                        f"The only thing you’ve built in this game is a solid reputation for being terrible.",
+                        f"Even the game itself is questioning why you’re still here.",
+                        f"Death shouldn’t be this easy, yet here you are proving otherwise.",
+                        f"There’s a difference between having bad luck and being the bad luck.",
+                        f"This game has thousands of mechanics, and yet you haven’t mastered a single one.",
+                        f"If common sense was a stat, yours would be in the negative.",
+                        f"You should probably craft a boat, because you've clearly sunk to a new low.",
+                        f"Every second you exist in this world is an insult to basic survival instincts.",
+                        f"You’ve set a new record for making the worst possible decisions in the shortest amount of time.",
+                        f"Your gameplay is proof that some people just aren’t meant to succeed.",
+                        f"Survival is a simple concept. Somehow, you’ve managed to misunderstand it entirely.",
+                        f"There’s a fine line between being unlucky and being a walking disaster. You obliterated that line.",
+                        f"If failure was a potion, you'd be the splash version—affecting everything around you.",
+                        f"If brains were durability, yours would have broken a long time ago.",
+                        f"The only real danger here is your own inability to function properly.",
+                        f"Every time you die, the void whispers ‘not this idiot again.’",
+                        f"This isn’t a learning curve, it’s a straight drop off a cliff, just like you.",
+                        f"At this point, the respawn button should just be a permanent part of your screen.",
+                        f"Out of all possible outcomes, you still somehow manage to choose the worst one.",
+                        f"The fact that you thought you’d survive that is the funniest joke of all.",
+                        f"You just took 'trial and error' and removed the trial part completely.",
+                        f"The only thing more painful than watching this is the thought of you trying again."
                     ]
                 await message.channel.send(random.choice(death_messages))
-            
-                logger.info(f"{minecraft_username} died")
-            else:
-                await message.add_reaction('❓')
-                logger.warning(f"Unknown player died: {message.content}")
+
         
         # Inside your advancement message handler
         elif message.content.startswith(ADVANCEMENT_MARKER) or ADVANCEMENT_MARKER in message.content:
