@@ -410,7 +410,7 @@ def save_daily_stats():
         # Get all player current stats
         players = get_all_players()
         
-        # For each player, save today's stats
+        # For each player, ensure they have an entry for today (but don't overwrite incremental values)
         for mc_username, disc_username, deaths, advancements, playtime in players:
             # Check if we already have an entry for today
             cursor.execute(
@@ -420,24 +420,16 @@ def save_daily_stats():
             today_stats = cursor.fetchone()
             
             if not today_stats:
-                # No entry exists for today, create a new one
+                # No entry exists for today, create a new one with zeros (incremental values will be added by other functions)
                 cursor.execute('''
                 INSERT INTO stats_history 
                 (minecraft_username, date, deaths, advancements, playtime_seconds)
                 VALUES (?, ?, 0, 0, 0)
                 ''', (mc_username, today))
-            
-            # Update today's entry with current totals
-            # This ensures we capture player stats even if they're not active
-            cursor.execute('''
-            UPDATE stats_history 
-            SET deaths = ?, advancements = ?, playtime_seconds = ?
-            WHERE minecraft_username = ? AND date = ?
-            ''', (deaths, advancements, playtime, mc_username, today))
         
         conn.commit()
         conn.close()
-        logger.info(f"Saved daily stats snapshot for {len(players)} players")
+        logger.info(f"Ensured daily stats entries exist for {len(players)} players")
         return True
     except Exception as e:
         logger.error(f"Error saving daily stats: {e}")
