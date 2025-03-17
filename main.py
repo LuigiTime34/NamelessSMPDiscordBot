@@ -657,8 +657,8 @@ async def updateroles_cmd(ctx):
     await updateroles_command(ctx, bot)
 
 @bot.command(name="addhistory")
-async def addhistory_cmd(ctx, username=None, action=None):
-    await addhistory_command(ctx, bot, username, action)
+async def addhistory_cmd(ctx, subcommand=None, arg=None, *args):
+    await addhistory_command(ctx, bot, subcommand, arg, *args)
 
 @bot.command(name="whitelist")
 async def whitelist_cmd(ctx, discord_user=None, minecraft_user=None):

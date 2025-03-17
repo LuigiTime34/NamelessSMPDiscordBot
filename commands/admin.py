@@ -12,13 +12,18 @@ async def updateroles_command(ctx, bot):
         await ctx.send("You don't have permission to use this command.")
         return
     
-    await ctx.message.add_reaction('✅')
-    
     await update_achievement_roles(bot, ctx.guild)
-    await ctx.send("Roles have been updated!")
+    await ctx.message.add_reaction('✅')
 
-async def addhistory_command(ctx, bot, username=None, action=None):
-    """Add or update player history."""
+async def addhistory_command(ctx, bot, subcommand=None, arg=None, *args):
+    """Add or update player history with various subcommands.
+    
+    Subcommands:
+    - bulk: Start interactive bulk update mode
+    - get USERNAME: Get history for a specific player
+    - USERNAME key=value [key=value ...]: Update specific values for a player
+    - delete USERNAME: Delete a player from the database
+    """
     # Check if user has mod role
     if not any(role.id == MOD_ROLE_ID for role in ctx.author.roles):
         await ctx.send("You don't have permission to use this command.")
@@ -26,24 +31,118 @@ async def addhistory_command(ctx, bot, username=None, action=None):
     
     await ctx.message.add_reaction('✅')
     
-    # Check if we're deleting a player
-    if username and action and action.lower() == "delete":
-        player_stats = get_player_stats(minecraft_username=username)
+    # Handle delete subcommand
+    if subcommand and subcommand.lower() == "delete" and arg:
+        player_stats = get_player_stats(minecraft_username=arg)
         if player_stats:
-            success = delete_player(username)
+            success = delete_player(arg)
             if success:
-                await ctx.send(f"Successfully deleted player {username} from the database.")
+                await ctx.send(f"Successfully deleted player {arg} from the database.")
             else:
-                await ctx.send(f"Error deleting player {username}.")
+                await ctx.send(f"Error deleting player {arg}.")
         else:
-            await ctx.send(f"Player {username} not found in the database.")
+            await ctx.send(f"Player {arg} not found in the database.")
         return
     
+    # Handle get subcommand
+    elif subcommand and subcommand.lower() == "get" and arg:
+        player_stats = get_player_stats(minecraft_username=arg)
+        if player_stats:
+            mc_username, disc_username, deaths, advancements, playtime = player_stats
+            embed = discord.Embed(
+                title=f"Player History: {mc_username}",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="Discord Username", value=disc_username or "Not linked", inline=False)
+            embed.add_field(name="Deaths", value=str(deaths), inline=True)
+            embed.add_field(name="Advancements", value=str(advancements), inline=True)
+            embed.add_field(name="Playtime", value=f"{playtime} seconds", inline=True)
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"Player {arg} not found in the database.")
+        return
+    
+    # Handle bulk subcommand
+    elif subcommand and subcommand.lower() == "bulk":
+        await handle_bulk_update(ctx, bot)
+        return
+    
+    # Handle direct update (username key=value)
+    elif subcommand:
+        # In this case, subcommand is the username
+        username = subcommand
+        player_stats = get_player_stats(minecraft_username=username)
+        if not player_stats:
+            await ctx.send(f"Player {username} not found in the database.")
+            return
+        
+        # Combine arg and args into a single list
+        all_args = [arg] if arg else []
+        all_args.extend(args)
+        
+        if not all_args:
+            await ctx.send("Please provide at least one key=value pair to update.")
+            return
+        
+        # Parse key=value pairs
+        updates = {username: {}}
+        for kv in all_args:
+            if '=' not in kv:
+                await ctx.send(f"Invalid format: {kv}. Use key=value format.")
+                continue
+            
+            key, value = kv.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            try:
+                value = int(value)
+                updates[username][key] = value
+            except ValueError:
+                await ctx.send(f"Invalid value for {key}: {value}. Must be a number.")
+                continue
+        
+        # Apply updates
+        if updates[username]:
+            success = bulk_update_history(updates)
+            if success:
+                await ctx.send(f"Successfully updated history for {username}!")
+            else:
+                await ctx.send("Error updating history. Check logs for details.")
+        else:
+            await ctx.send("No valid updates provided.")
+        return
+    
+    # Display help if no subcommand provided
+    else:
+        embed = discord.Embed(
+            title="Player History Command",
+            description="Usage instructions:",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="Subcommands",
+            value=(
+                "**!addhistory bulk**\n"
+                "Start interactive bulk update mode\n\n"
+                "**!addhistory get USERNAME**\n"
+                "Get history for a specific player\n\n"
+                "**!addhistory USERNAME key=value [key=value ...]**\n"
+                "Update specific values for a player\n\n"
+                "**!addhistory delete USERNAME**\n"
+                "Delete a player from the database"
+            ),
+            inline=False
+        )
+        await ctx.send(embed=embed)
+
+async def handle_bulk_update(ctx, bot):
+    """Handle the bulk update flow for addhistory command."""
     # Get current stats
     players = get_all_players()
     
     embed = discord.Embed(
-        title="Player History",
+        title="Bulk Player History Update",
         description="Current values for all players. Reply with changes to update.",
         color=discord.Color.blue()
     )
@@ -61,24 +160,17 @@ username2: deaths=2, advancements=15, playtime=7200
 """
     embed.add_field(name="Instructions", value=instructions, inline=False)
     
-    # Format current values
-    current_values = "```\n"
-    for mc_username, disc_username, deaths, advancements, playtime in players:
-        current_values += f"{mc_username}: deaths={deaths}, advancements={advancements}, playtime={playtime}\n"
-    current_values += "```"
-    
-    # Split long content into multiple fields if needed
+    # Format current values and split if too long
     def add_embed_fields(embed, name, content):
         chunks = [content[i:i + 1000] for i in range(0, len(content), 1000)]
         for index, chunk in enumerate(chunks):
             embed.add_field(name=f"{name} (Part {index + 1})" if len(chunks) > 1 else name, value=f"```{chunk}```", inline=False)
 
-    # Format current values and split if too long
+    # Format current values
     current_values = "\n".join(f"{mc_username}: deaths={deaths}, advancements={advancements}, playtime={playtime}"
                             for mc_username, _, deaths, advancements, playtime in players)
 
     add_embed_fields(embed, "Current Values", current_values)
-
     
     await ctx.send(embed=embed)
     
