@@ -72,7 +72,7 @@ async def trigger_stat_updates(bot, guild, scoreboard_channel):
 
 
 # Daily stats summary task - Run at 00:05 est daily
-@tasks.loop(time=datetime.time(hour=0, minute=5, tzinfo=pytz.est))
+@tasks.loop(time=datetime.time(hour=0, minute=5, tzinfo=pytz.utc))
 async def daily_stats_summary():
     """Post daily stats summary."""
     global logger
@@ -90,7 +90,7 @@ async def daily_stats_summary():
             return
 
         # Get yesterday's date (since the task runs just after midnight est)
-        yesterday = (datetime.datetime.now(pytz.est) - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday = (datetime.datetime.now(pytz.utc) - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Connect to DB
         conn = get_connection()
@@ -124,7 +124,7 @@ async def daily_stats_summary():
             title="📊 Daily Stats Summary",
             description=f"Player activity for {yesterday}",
             color=discord.Color.blue(),
-            timestamp=datetime.datetime.now(pytz.est)
+            timestamp=datetime.datetime.now(pytz.utc)
         )
 
         # Most deaths
@@ -166,12 +166,12 @@ async def daily_stats_summary():
 # REMOVED before_daily_stats
 
 # Weekly stats task - Run at 00:15 est daily, but logic only executes on Sunday
-@tasks.loop(time=datetime.time(hour=0, minute=15, tzinfo=pytz.est))
+@tasks.loop(time=datetime.time(hour=0, minute=15, tzinfo=pytz.utc))
 async def weekly_stats_summary():
     """Post weekly stats summary using saved stats."""
     global logger
 
-    now = datetime.datetime.now(pytz.est)
+    now = datetime.datetime.now(pytz.utc)
     # Only run the summary logic if it's Sunday (weekday() == 6)
     if now.weekday() != 6:
         # logger.debug("Skipping weekly summary, not Sunday.") # Optional: reduce log spam
@@ -228,7 +228,7 @@ async def weekly_stats_summary():
             title="📊 Weekly Stats Summary",
             description=f"Player activity for the week {start_date} to {end_date}",
             color=discord.Color.gold(),
-            timestamp=datetime.datetime.now(pytz.est)
+            timestamp=datetime.datetime.now(pytz.utc)
         )
 
         # Most deaths

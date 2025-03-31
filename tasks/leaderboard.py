@@ -39,7 +39,7 @@ async def update_leaderboards(bot, channel):
     deaths_data = get_all_deaths() # Sorted lowest to highest
 
     # Create embeds
-    current_time_est = datetime.datetime.now(pytz.est)
+    current_time_est = datetime.datetime.now(pytz.utc)
     current_ts = int(current_time_est.timestamp())
 
     # Playtime leaderboard

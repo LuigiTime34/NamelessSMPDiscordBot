@@ -300,7 +300,7 @@ async def currentstats_command(ctx, bot):
         today_stats = get_stats_for_period(1) # Use 1 day period for today
 
         # Get This Week's Stats (Sunday to Now, est based)
-        now_est = datetime.datetime.now(pytz.est)
+        now_est = datetime.datetime.now(pytz.utc)
         # What day is it? (0=Mon, 6=Sun) -> We want Sunday as start (day 6)
         # days_since_sunday = now_est.weekday() + 1 if now_est.weekday() != 6 else 0 # Incorrect calculation
         days_since_sunday = (now_est.weekday() + 1) % 7 # Correct: Mon=1, Tue=2... Sun=0 -> days since last Sun
@@ -331,7 +331,7 @@ async def currentstats_command(ctx, bot):
         embed = discord.Embed(
             title="Current Activity Stats",
             color=discord.Color.purple(),
-            timestamp=datetime.datetime.now(pytz.est)
+            timestamp=datetime.datetime.now(pytz.utc)
         )
         embed.set_footer(text="Stats since last midnight est / last Sunday midnight est")
 

@@ -70,7 +70,7 @@ def record_death(minecraft_username):
         )
 
         # Also update today's stats directly (use est date)
-        today_est = datetime.datetime.now(pytz.est).strftime("%Y-%m-%d")
+        today_est = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%d")
         cursor.execute('''
         INSERT INTO stats_history (minecraft_username, date, deaths, advancements, playtime_seconds)
         VALUES (?, ?, 1, 0, 0)
@@ -95,7 +95,7 @@ def record_advancement(minecraft_username):
         )
 
         # Also update today's stats directly (use est date)
-        today_est = datetime.datetime.now(pytz.est).strftime("%Y-%m-%d")
+        today_est = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%d")
         cursor.execute('''
         INSERT INTO stats_history (minecraft_username, date, deaths, advancements, playtime_seconds)
         VALUES (?, ?, 0, 1, 0)
@@ -114,7 +114,7 @@ def record_login(minecraft_username):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        current_time = int(datetime.datetime.now(pytz.est).timestamp()) # Use est timestamp
+        current_time = int(datetime.datetime.now(pytz.utc).timestamp()) # Use est timestamp
         cursor.execute(
             "INSERT OR REPLACE INTO online_players (minecraft_username, login_time) VALUES (?, ?)",
             (minecraft_username, current_time)
@@ -141,7 +141,7 @@ def record_logout(minecraft_username):
 
         if result:
             login_time = result[0]
-            current_time = int(datetime.datetime.now(pytz.est).timestamp()) # Use est timestamp
+            current_time = int(datetime.datetime.now(pytz.utc).timestamp()) # Use est timestamp
             # Ensure playtime is not negative if clock adjustments happened
             playtime = max(0, current_time - login_time)
 
@@ -152,7 +152,7 @@ def record_logout(minecraft_username):
             )
 
             # Also update today's stats (use est date)
-            today_est = datetime.datetime.now(pytz.est).strftime("%Y-%m-%d")
+            today_est = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%d")
             cursor.execute('''
             INSERT INTO stats_history (minecraft_username, date, deaths, advancements, playtime_seconds)
             VALUES (?, ?, 0, 0, ?)
@@ -304,8 +304,8 @@ def clear_online_players():
             logger.info("No online players to clear.")
             return # Nothing to do
 
-        current_time = int(datetime.datetime.now(pytz.est).timestamp()) # Use est timestamp
-        today_est = datetime.datetime.now(pytz.est).strftime("%Y-%m-%d") # Use est date
+        current_time = int(datetime.datetime.now(pytz.utc).timestamp()) # Use est timestamp
+        today_est = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%d") # Use est date
 
         # Update playtime for each player
         for player in players:
@@ -447,7 +447,7 @@ def save_daily_stats():
         cursor = conn.cursor()
 
         # Get current date in YYYY-MM-DD format (est)
-        today_est = datetime.datetime.now(pytz.est).strftime("%Y-%m-%d")
+        today_est = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%d")
 
         # Get all known players from the main stats table
         cursor.execute("SELECT minecraft_username FROM player_stats")
@@ -489,7 +489,7 @@ def get_stats_for_period(period_days):
         cursor = conn.cursor()
 
         # Calculate date range using est dates
-        end_date_dt = datetime.datetime.now(pytz.est)
+        end_date_dt = datetime.datetime.now(pytz.utc)
         # For a 1-day period, start_date is also today
         # For a 7-day period, start_date is 6 days ago (today inclusive)
         start_date_dt = end_date_dt - datetime.timedelta(days=max(0, period_days - 1))
