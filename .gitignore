@@ -22,6 +22,8 @@ wheels/
 token.txt
 bear_token.txt
 henry_token.txt
+apikey.txt
+google_api_key.txt
 
 # Virtual Environment
 venv/
