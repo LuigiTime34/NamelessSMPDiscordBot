@@ -11,7 +11,7 @@ import sys
 from utils.logging import setup_logging, DiscordHandler
 
 # Set up intents
-intents = discord.Intents.default()
+intents = discord.Intents.all()
 intents.reactions = True
 intents.message_content = True
 intents.members = True

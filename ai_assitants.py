@@ -83,7 +83,7 @@ except Exception as e:
     
 
 # --- Bot Setup ---
-intents = discord.Intents.default(); intents.message_content = True; intents.members = True; intents.guilds = True
+intents = discord.Intents.all(); intents.message_content = True; intents.members = True; intents.guilds = True
 BOT_PREFIX = getattr(const, 'BOT_PREFIX', '!')
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None, case_insensitive=True)
 
