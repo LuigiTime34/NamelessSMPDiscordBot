@@ -281,6 +281,7 @@ def run_idle_bots():
     subprocess.Popen(["python", "run_henry.py"])
     # Add trading bot
     subprocess.Popen(["python", "trading_bot.py"])
+    subprocess.Popen(["python", "ai_assitants.py"])
 
 # Bot event handlers
 @bot.event
