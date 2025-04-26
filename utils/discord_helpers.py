@@ -28,12 +28,16 @@ def get_discord_from_minecraft(minecraft_username):
     
     return result[0] if result else None
 
-def get_discord_user(bot, discord_name):
-    """Get Discord user object from username."""
-    for guild in bot.guilds:
-        for member in guild.members:
-            if member.name.lower() == discord_name.lower() or str(member).lower() == discord_name.lower():
-                return member
+def get_discord_user(bot, discord_name, guild): # <--- ADD 'guild' PARAMETER HERE
+    """Get Discord user object from username within a specific guild."""
+    # ADD A CHECK in case guild is None, though it shouldn't be in this context
+    if not guild:
+        return None
+
+    for member in guild.members:
+        # Using lower() for case-insensitive comparison is good practice
+        if member.name.lower() == discord_name.lower() or str(member).lower() == discord_name.lower():
+            return member
     return None
 
 def get_player_display_names(minecraft_usernames, guild):

@@ -39,7 +39,7 @@ from tasks.roles import (
 from utils.logging import setup_logging
 
 # Initialize bot with required intents
-intents = discord.Intents.default()
+intents = discord.Intents.all()
 intents.message_content = True  # For reading message content
 intents.members = True  # For accessing member info
 bot = commands.Bot(command_prefix='!', intents=intents)
