@@ -14,6 +14,9 @@ import re # Keep for potential future use? Remove if not used.
 import io
 import time
 question_helper_cooldowns = {}
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Gemini LLM Setup ---
 try:
@@ -41,13 +44,15 @@ try:
 except Exception as e: logger.exception(f"Error loading logging module: {e}.")
 
 # --- Read Secrets ---
-try:
-    with open(const.TOKEN_FILE, 'r') as f: TOKEN = f.read().strip()
-    # with open(const.API_KEY_FILE, 'r') as f: OPENROUTER_API_KEY = f.read().strip()
-    with open(const.GOOGLE_API_KEY_FILE, 'r') as f: GOOGLE_API_KEY = f.read().strip()
-    if not TOKEN or not GOOGLE_API_KEY: raise ValueError("Discord Token or Google API Key is empty.")
-except FileNotFoundError as e: logger.critical(f"Secret file not found: {e}"); exit(1)
-except ValueError as e: logger.critical(f"{e}"); exit(1)
+TOKEN = os.getenv("DISCORD_TOKEN_AI")
+if not TOKEN:
+    print("Error: DISCORD_TOKEN_AI not found in .env file!")
+    exit(1)
+    
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    print("Error: GOOGLE_API_KEY not found in .env file!")
+    exit(1)
 
 # --- Configure LLM (OpenRouter Client) ---
 # Configure the openai client to point to OpenRouter
@@ -2030,7 +2035,6 @@ except: logger.warning("Signal handlers not set (may be Windows).")
 
 
 # --- Run ---
-# --- MODIFY Block Below ---
 if __name__ == "__main__":
     # --- MODIFIED: Check different constants ---
     missing_constants = [c for c in [

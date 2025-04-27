@@ -9,6 +9,10 @@ from trading_db.trading_database import Database
 import logging
 import sys
 from utils.logging import setup_logging, DiscordHandler
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Set up intents
 intents = discord.Intents.all()
@@ -420,8 +424,10 @@ def run_bot():
     )
     temp_logger = logging.getLogger('startup')
     
-    with open('token.txt', 'r') as f:
-        TOKEN = f.readline().strip()
+    TOKEN = os.getenv("DISCORD_TOKEN_TRADE")
+    if not TOKEN:
+        print("Error: DISCORD_TOKEN_TRADE not found in .env file!")
+        exit(1)
     
     temp_logger.info("Starting Discord Trading Bot")
     

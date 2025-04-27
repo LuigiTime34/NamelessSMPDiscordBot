@@ -7,6 +7,10 @@ import asyncio
 import datetime
 import logging
 import pytz
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Import from our modules
 from const import (
@@ -72,7 +76,7 @@ async def trigger_stat_updates(bot, guild, scoreboard_channel):
 
 
 # Daily stats summary task - Run at 00:05 est daily
-@tasks.loop(time=datetime.time(hour=0, minute=5, tzinfo=pytz.utc))
+@tasks.loop(time=datetime.time(hour=3, minute=55, tzinfo=pytz.utc))
 async def daily_stats_summary():
     """Post daily stats summary."""
     global logger
@@ -729,6 +733,8 @@ if __name__ == "__main__":
         print("Error: pytz library not found. Please install it using 'pip install pytz'")
         exit(1)
 
-    with open('token.txt', 'r') as f:
-        TOKEN = f.readline().strip()
+    TOKEN = os.getenv("DISCORD_TOKEN_MAIN")
+    if not TOKEN:
+        print("Error: DISCORD_TOKEN_MAIN not found in .env file!")
+        exit(1)
     bot.run(TOKEN)
