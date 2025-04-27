@@ -24,6 +24,10 @@ bear_token.txt
 henry_token.txt
 apikey.txt
 google_api_key.txt
+assistants.db
+stats.db
+*.sqlite3
+*.db
 
 # Virtual Environment
 venv/
