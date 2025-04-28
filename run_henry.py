@@ -24,9 +24,18 @@ async def on_message(message):
 @bot.event
 async def on_ready():
     print(bot, f"{bot.user} is online!")
-
-TOKEN = os.getenv("DISCORD_TOKEN_HENRY")
-if not TOKEN:
-    print("Error: DISCORD_TOKEN_HENRY not found in .env file!")
-    exit(1)
-bot.run(TOKEN)
+try:
+    TOKEN = os.getenv("DISCORD_TOKEN_HENRY")
+    if not TOKEN:
+        print("Error: DISCORD_TOKEN_HENRY not found in .env file!")
+        exit(1)
+    bot.run(TOKEN)
+except KeyboardInterrupt:
+    print("\nShutting down gracefully...")
+    if bot:
+        # Close the bot's session
+        try:
+            bot.loop.run_until_complete(bot.close())
+        except:
+            pass
+    exit(0)

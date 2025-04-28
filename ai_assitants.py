@@ -2062,6 +2062,15 @@ if __name__ == "__main__":
             logger.critical("CRITICAL: Login Failed - Check bot token.")
         except Exception as e:
              logger.critical("CRITICAL: Unhandled error during bot run", exc_info=True)
+        except KeyboardInterrupt:
+            print("\nShutting down gracefully...")
+            if bot:
+                # Close the bot's session
+                try:
+                    bot.loop.run_until_complete(bot.close())
+                except:
+                    pass
+            exit(0)
         finally:
              logger.info("Bot run ended or error occurred. Ensuring DB closed.")
              try: asyncio.run(cleanup()) # Try running async cleanup

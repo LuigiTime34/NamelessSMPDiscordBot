@@ -435,6 +435,15 @@ def run_bot():
         bot.run(TOKEN)
     except Exception as e:
         temp_logger.critical(f"Failed to start bot: {e}")
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+        if bot:
+            # Close the bot's session
+            try:
+                bot.loop.run_until_complete(bot.close())
+            except:
+                pass
+        exit(0)
     finally:
         # Close the database connection when the bot shuts down
         db.close()
